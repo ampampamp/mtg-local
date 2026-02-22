@@ -1,0 +1,16 @@
+# Data (Scryfall bulk JSON + SQLite DB — don't commit these)
+data/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Node
+node_modules/
+frontend/dist/
+
+# OS
+.DS_Store
+
