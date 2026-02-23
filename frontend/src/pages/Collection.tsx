@@ -128,6 +128,17 @@ export default function CollectionPage() {
   const [filterInput, setFilterInput] = useState('')
   const [filterOracleIds, setFilterOracleIds] = useState<Set<string> | null>(null)
   const [filterLoading, setFilterLoading] = useState(false)
+  const [filterLoadingMore, setFilterLoadingMore] = useState(false)
+  const filterQueryId = useRef(0)
+  // Mutable state for the active filter's pagination (avoids stale closures)
+  const filterRef = useRef<{
+    queryId: number
+    query: string
+    nextPage: number
+    allIds: Set<string>
+    hasMore: boolean
+    fetching: boolean
+  } | null>(null)
 
   const gridRef = useRef<HTMLDivElement>(null)
   const addFocusRef = useRef<(() => void) | null>(null)
@@ -141,6 +152,10 @@ export default function CollectionPage() {
   })
 
   const cards: CollectionEntry[] = data?.data ?? []
+  // Keep a ref so ensureFilterCoverage can compute filtered count without stale closures
+  const cardsRef = useRef<CollectionEntry[]>([])
+  cardsRef.current = cards
+
   const filtered = filterOracleIds
     ? cards.filter(c => c.oracle_id && filterOracleIds.has(c.oracle_id))
     : cards
@@ -153,8 +168,8 @@ export default function CollectionPage() {
   const handlerRef = useRef({ selectedIndex, pagedCards, view, modal, printingPicker })
   handlerRef.current = { selectedIndex, pagedCards, view, modal, printingPicker }
 
-  // Reset page + selection when filter or view changes
-  useEffect(() => { setPage(1); setSelectedIndex(null) }, [filterOracleIds, view])
+  // Reset page + selection when view changes (filter resets page explicitly in applyFilter/clearFilter)
+  useEffect(() => { setPage(1); setSelectedIndex(null) }, [view])
 
   const openModalForEntry = useCallback((entry: CollectionEntry) => {
     setModal({
@@ -295,38 +310,86 @@ export default function CollectionPage() {
     }
   }
 
+  // Fetch more Scryfall pages until the filtered collection has enough cards for
+  // `collectionPage`, or until there are no more Scryfall pages.
+  async function ensureFilterCoverage(collectionPage: number) {
+    const state = filterRef.current
+    if (!state || !state.hasMore || state.fetching) return
+    if (state.queryId !== filterQueryId.current) return
+
+    const needed = collectionPage * PAGE_SIZE
+    const current = cardsRef.current.filter(c => c.oracle_id && state.allIds.has(c.oracle_id)).length
+    if (current >= needed) return
+
+    state.fetching = true
+    setFilterLoadingMore(true)
+
+    while (state.hasMore) {
+      if (state.queryId !== filterQueryId.current) break
+      try {
+        const result = await searchCards(state.query, state.nextPage)
+        if (state.queryId !== filterQueryId.current) break
+        ;(result.data ?? []).forEach((c: ScryfallCard) => {
+          if (c.oracle_id) state.allIds.add(c.oracle_id)
+        })
+        state.hasMore = !!result.has_more
+        state.nextPage++
+        setFilterOracleIds(new Set(state.allIds))
+        const count = cardsRef.current.filter(c => c.oracle_id && state.allIds.has(c.oracle_id)).length
+        if (count >= needed) break
+      } catch {
+        state.hasMore = false
+        break
+      }
+    }
+
+    state.fetching = false
+    setFilterLoadingMore(false)
+  }
+
   async function applyFilter() {
     if (!filterInput.trim()) { clearFilter(); return }
+
+    const queryId = ++filterQueryId.current
+    const query = filterInput.trim()
+    filterRef.current = null
     setFilterLoading(true)
+
     try {
+      const first = await searchCards(query, 1)
+      if (queryId !== filterQueryId.current) return
+
       const allIds = new Set<string>()
-      let p = 1
-      let hasMore = true
-      const MAX_PAGES = 20
-      while (hasMore && p <= MAX_PAGES) {
-        const result = await searchCards(filterInput.trim(), p)
-        ;(result.data ?? []).forEach((c: ScryfallCard) => {
-          if (c.oracle_id) allIds.add(c.oracle_id)
-        })
-        hasMore = !!result.has_more
-        p++
-      }
-      setFilterOracleIds(allIds)
-    } catch {
-      // keep previous filter on error
-    } finally {
+      ;(first.data ?? []).forEach((c: ScryfallCard) => {
+        if (c.oracle_id) allIds.add(c.oracle_id)
+      })
+      filterRef.current = { queryId, query, nextPage: 2, allIds, hasMore: !!first.has_more, fetching: false }
+      setFilterOracleIds(new Set(allIds))
+      setPage(1)
+      setSelectedIndex(null)
       setFilterLoading(false)
+
+      // Ensure we have enough results for page 1 of the collection
+      await ensureFilterCoverage(1)
+    } catch {
+      if (queryId === filterQueryId.current) setFilterLoading(false)
     }
   }
 
   function clearFilter() {
+    filterQueryId.current++ // cancels any in-flight ensureFilterCoverage
+    filterRef.current = null
     setFilterInput('')
     setFilterOracleIds(null)
+    setFilterLoadingMore(false)
+    setPage(1)
+    setSelectedIndex(null)
   }
 
   function handlePageChange(p: number) {
     setPage(p)
     setSelectedIndex(null)
+    ensureFilterCoverage(p)
   }
 
   return (
@@ -499,8 +562,14 @@ export default function CollectionPage() {
 
       {/* Filter status */}
       {filterOracleIds !== null && (
-        <div className="text-xs text-gray-400">
-          Showing {filtered.length} of {cards.length} owned cards
+        <div className="flex items-center gap-2 text-xs text-gray-400">
+          <span>Showing {filtered.length} of {cards.length} owned cards</span>
+          {filterLoadingMore && (
+            <svg className="animate-spin h-3 w-3 shrink-0" viewBox="0 0 24 24" fill="none">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+            </svg>
+          )}
         </div>
       )}
 
