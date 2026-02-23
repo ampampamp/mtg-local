@@ -88,6 +88,39 @@ async def search(
     return result
 
 
+@router.get("/printings")
+async def get_printings(
+    oracle_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return all printings of a card by oracle_id, sorted newest first."""
+    printings = card_store.cards_by_oracle_all.get(oracle_id, [])
+    if not printings:
+        raise HTTPException(status_code=404, detail="No printings found")
+    printings = sorted(printings, key=lambda c: c.get("released_at", ""), reverse=True)
+    annotated = await annotate_cards(printings, db)
+    return {
+        "data": [
+            {
+                "id": c.get("id"),
+                "oracle_id": c.get("oracle_id"),
+                "name": c.get("name"),
+                "set": c.get("set"),
+                "set_name": c.get("set_name"),
+                "collector_number": c.get("collector_number"),
+                "released_at": c.get("released_at"),
+                "image_uri": card_store.get_image_uri(c),
+                "prices": c.get("prices", {}),
+                "scryfall_uri": c.get("scryfall_uri", ""),
+                "related_uris": {"edhrec": (c.get("related_uris") or {}).get("edhrec")},
+                "purchase_uris": {"tcgplayer": (c.get("purchase_uris") or {}).get("tcgplayer")},
+                "_ownership": c.get("_ownership"),
+            }
+            for c in annotated
+        ]
+    }
+
+
 @router.get("/{scryfall_id}")
 async def get_card(scryfall_id: str, db: AsyncSession = Depends(get_db)):
     """Get a single card by Scryfall ID from the local bulk store."""

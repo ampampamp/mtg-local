@@ -1,9 +1,12 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getCollection, deleteCollectionCard, importCollection, searchCards } from '../api'
 import type { CollectionEntry, ScryfallCard } from '../types'
 import CardAutocomplete from '../components/CardAutocomplete'
 import AddToCollectionModal from '../components/AddToCollectionModal'
+import PrintingPickerModal from '../components/PrintingPickerModal'
+
+const PAGE_SIZE = 60
 
 function entryToCard(entry: CollectionEntry): ScryfallCard {
   return {
@@ -13,22 +16,35 @@ function entryToCard(entry: CollectionEntry): ScryfallCard {
     set: entry.set_code,
     set_name: entry.set_name,
     collector_number: entry.collector_number,
+    image_uri: entry.image_uri,
     prices: entry.prices,
+    scryfall_uri: entry.scryfall_uri,
+    related_uris: entry.related_uris,
+    purchase_uris: entry.purchase_uris,
   }
 }
 
 interface TileProps {
   card: CollectionEntry
+  index: number
+  selected: boolean
   onClick: () => void
+  onDoubleClick: () => void
 }
 
-function CollectionTile({ card, onClick }: TileProps) {
+function CollectionTile({ card, index, selected, onClick, onDoubleClick }: TileProps) {
   const deckCount = card._ownership?.decks?.length ?? 0
   const deckTitle = card._ownership?.decks?.map(d => `${d.deck_name} ×${d.quantity}`).join(', ')
   return (
     <div
-      className="bg-mtg-card rounded-lg overflow-hidden cursor-pointer hover:ring-2 hover:ring-blue-500 transition-all"
+      data-card-index={index}
+      className={`bg-mtg-card rounded-lg overflow-hidden cursor-pointer transition-all
+        ${selected
+          ? 'ring-2 ring-blue-400'
+          : 'hover:ring-2 hover:ring-blue-500'
+        }`}
       onClick={onClick}
+      onDoubleClick={onDoubleClick}
     >
       {card.image_uri ? (
         <img src={card.image_uri} alt={card.name} className="w-full" loading="lazy" />
@@ -37,22 +53,24 @@ function CollectionTile({ card, onClick }: TileProps) {
           {card.name}
         </div>
       )}
-      <div className="p-2 space-y-1 text-xs">
+      <div className="p-2 text-xs">
         <div className="flex items-center justify-between gap-1">
-          <span className="font-medium">
+          <span className="font-medium flex items-center gap-1.5">
             {card.quantity > 0 ? `${card.quantity}` : ''}
             {card.quantity > 0 && card.foil_quantity > 0 ? ' + ' : ''}
             {card.foil_quantity > 0 ? `${card.foil_quantity}✨` : ''}
+            {deckCount > 0 ? (
+              <span className="text-blue-400 font-normal" title={deckTitle}>
+                · {deckCount}d
+              </span>
+            ) : (
+              <span className="text-gray-600 font-normal">—</span>
+            )}
           </span>
           {card.prices?.usd && (
             <span className="text-mtg-gold">${card.prices.usd}</span>
           )}
         </div>
-        {deckCount > 0 && (
-          <div className="text-blue-400 cursor-default" title={deckTitle}>
-            {deckCount} deck{deckCount !== 1 ? 's' : ''}
-          </div>
-        )}
       </div>
     </div>
   )
@@ -62,12 +80,39 @@ interface ModalState {
   card: ScryfallCard
   initialQty: number
   initialFoilQty: number
+  isExisting: boolean
+}
+
+function Pagination({ page, totalPages, onChange }: { page: number; totalPages: number; onChange: (p: number) => void }) {
+  if (totalPages <= 1) return null
+  return (
+    <div className="flex items-center justify-center gap-3 pt-2">
+      <button
+        onClick={() => onChange(Math.max(1, page - 1))}
+        disabled={page === 1}
+        className="btn-secondary text-sm disabled:opacity-30"
+      >
+        ← Prev
+      </button>
+      <span className="text-sm text-gray-400">Page {page} of {totalPages}</span>
+      <button
+        onClick={() => onChange(Math.min(totalPages, page + 1))}
+        disabled={page === totalPages}
+        className="btn-secondary text-sm disabled:opacity-30"
+      >
+        Next →
+      </button>
+    </div>
+  )
 }
 
 export default function CollectionPage() {
   const qc = useQueryClient()
-  const [view, setView] = useState<'list' | 'gallery'>('list')
+  const [view, setView] = useState<'list' | 'gallery'>('gallery')
   const [modal, setModal] = useState<ModalState | null>(null)
+  const [printingPicker, setPrintingPicker] = useState<{ oracleId: string; cardName: string } | null>(null)
+  const [page, setPage] = useState(1)
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null)
 
   // Import panel state
   const [importOpen, setImportOpen] = useState(false)
@@ -83,7 +128,10 @@ export default function CollectionPage() {
   const [filterInput, setFilterInput] = useState('')
   const [filterOracleIds, setFilterOracleIds] = useState<Set<string> | null>(null)
   const [filterLoading, setFilterLoading] = useState(false)
-  const [filterTruncated, setFilterTruncated] = useState(false)
+
+  const gridRef = useRef<HTMLDivElement>(null)
+  const addFocusRef = useRef<(() => void) | null>(null)
+  const filterInputRef = useRef<HTMLInputElement>(null)
 
   const { data, isLoading } = useQuery({ queryKey: ['collection'], queryFn: getCollection })
 
@@ -97,20 +145,119 @@ export default function CollectionPage() {
     ? cards.filter(c => c.oracle_id && filterOracleIds.has(c.oracle_id))
     : cards
 
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+  const safePage = Math.min(page, totalPages)
+  const pagedCards = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE)
+
+  // Keep a ref with current values to avoid stale closures in the keydown handler
+  const handlerRef = useRef({ selectedIndex, pagedCards, view, modal, printingPicker })
+  handlerRef.current = { selectedIndex, pagedCards, view, modal, printingPicker }
+
+  // Reset page + selection when filter or view changes
+  useEffect(() => { setPage(1); setSelectedIndex(null) }, [filterOracleIds, view])
+
+  const openModalForEntry = useCallback((entry: CollectionEntry) => {
+    setModal({
+      card: entryToCard(entry),
+      initialQty: entry.quantity,
+      initialFoilQty: entry.foil_quantity,
+      isExisting: true,
+    })
+  }, [])
+
+  // Global keydown handler — attached once, reads current state via ref
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      const { selectedIndex, pagedCards, view, modal, printingPicker } = handlerRef.current
+      const tag = (document.activeElement as HTMLElement)?.tagName?.toLowerCase()
+      const inInput = tag === 'input' || tag === 'textarea' || tag === 'select'
+
+      // Escape: blur any focused input, close modal, close printing picker, then deselect
+      if (e.key === 'Escape') {
+        ;(document.activeElement as HTMLElement)?.blur()
+        if (modal) {
+          setModal(null)
+        } else if (printingPicker) {
+          setPrintingPicker(null)
+        } else {
+          setSelectedIndex(null)
+        }
+        return
+      }
+
+      if (inInput) return
+
+      // a → focus add-card input, f → focus filter input
+      if (e.key.toLowerCase() === 'a' && !modal && !printingPicker) {
+        e.preventDefault()
+        setSelectedIndex(null)
+        addFocusRef.current?.()
+        return
+      }
+      if (e.key.toLowerCase() === 'f' && !modal && !printingPicker) {
+        e.preventDefault()
+        setSelectedIndex(null)
+        filterInputRef.current?.focus()
+        return
+      }
+
+      // Enter opens modal for selected card
+      if (e.key === 'Enter' && selectedIndex !== null && !modal && !printingPicker) {
+        e.preventDefault()
+        const entry = pagedCards[selectedIndex]
+        if (entry) openModalForEntry(entry)
+        return
+      }
+
+      // Arrow key navigation
+      if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key) && !modal && !printingPicker) {
+        if (pagedCards.length === 0) return
+        e.preventDefault()
+
+        const total = pagedCards.length
+        const current = selectedIndex ?? -1
+        let next = current
+
+        if (view === 'list') {
+          if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+            next = current <= 0 ? 0 : current - 1
+          } else {
+            next = current < 0 ? 0 : Math.min(total - 1, current + 1)
+          }
+        } else {
+          // Gallery: 2D navigation — measure column count from the live grid
+          let cols = 1
+          if (gridRef.current) {
+            const colStr = getComputedStyle(gridRef.current).gridTemplateColumns
+            cols = colStr.split(' ').filter(Boolean).length
+          }
+          if (e.key === 'ArrowLeft') next = current <= 0 ? 0 : current - 1
+          else if (e.key === 'ArrowRight') next = current < 0 ? 0 : Math.min(total - 1, current + 1)
+          else if (e.key === 'ArrowUp') next = current - cols < 0 ? (current < 0 ? 0 : current) : current - cols
+          else if (e.key === 'ArrowDown') next = current < 0 ? 0 : Math.min(total - 1, current + cols)
+        }
+
+        setSelectedIndex(next)
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [openModalForEntry]) // openModalForEntry is stable via useCallback
+
+  // Scroll selected card into view when navigating with keys
+  useEffect(() => {
+    if (selectedIndex === null) return
+    const el = document.querySelector(`[data-card-index="${selectedIndex}"]`)
+    el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }, [selectedIndex])
+
   const totalCards = cards.reduce((s, c) => s + c.quantity + c.foil_quantity, 0)
   const totalValue = cards.reduce((s, c) => {
     const price = parseFloat(c.prices?.usd ?? '0')
     const foilPrice = parseFloat(c.prices?.usd_foil ?? '0')
     return s + price * c.quantity + foilPrice * c.foil_quantity
   }, 0)
-
-  function openModalForEntry(entry: CollectionEntry) {
-    setModal({
-      card: entryToCard(entry),
-      initialQty: entry.quantity,
-      initialFoilQty: entry.foil_quantity,
-    })
-  }
 
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -120,7 +267,6 @@ export default function CollectionPage() {
       const text = ev.target?.result as string
       setImportCsv(text)
       setImportFileName(file.name)
-      // count data rows (total lines minus header)
       const rows = text.split('\n').filter(l => l.trim()).length - 1
       setImportRowCount(Math.max(0, rows))
     }
@@ -150,19 +296,24 @@ export default function CollectionPage() {
   }
 
   async function applyFilter() {
-    if (!filterInput.trim()) {
-      clearFilter()
-      return
-    }
+    if (!filterInput.trim()) { clearFilter(); return }
     setFilterLoading(true)
-    setFilterTruncated(false)
     try {
-      const result = await searchCards(filterInput.trim())
-      const ids = new Set<string>((result.data ?? []).map((c: ScryfallCard) => c.oracle_id).filter(Boolean))
-      setFilterOracleIds(ids)
-      setFilterTruncated(!!result.has_more)
+      const allIds = new Set<string>()
+      let p = 1
+      let hasMore = true
+      const MAX_PAGES = 20
+      while (hasMore && p <= MAX_PAGES) {
+        const result = await searchCards(filterInput.trim(), p)
+        ;(result.data ?? []).forEach((c: ScryfallCard) => {
+          if (c.oracle_id) allIds.add(c.oracle_id)
+        })
+        hasMore = !!result.has_more
+        p++
+      }
+      setFilterOracleIds(allIds)
     } catch {
-      // on error keep previous filter
+      // keep previous filter on error
     } finally {
       setFilterLoading(false)
     }
@@ -171,7 +322,11 @@ export default function CollectionPage() {
   function clearFilter() {
     setFilterInput('')
     setFilterOracleIds(null)
-    setFilterTruncated(false)
+  }
+
+  function handlePageChange(p: number) {
+    setPage(p)
+    setSelectedIndex(null)
   }
 
   return (
@@ -185,16 +340,16 @@ export default function CollectionPage() {
           </div>
           <div className="flex rounded border border-gray-700 overflow-hidden">
             <button
-              className={`px-3 py-1 text-sm ${view === 'list' ? 'bg-mtg-surface text-white' : 'text-gray-400 hover:text-white'}`}
-              onClick={() => setView('list')}
-            >
-              List
-            </button>
-            <button
-              className={`px-3 py-1 text-sm border-l border-gray-700 ${view === 'gallery' ? 'bg-mtg-surface text-white' : 'text-gray-400 hover:text-white'}`}
+              className={`px-3 py-1 text-sm ${view === 'gallery' ? 'bg-mtg-surface text-white' : 'text-gray-400 hover:text-white'}`}
               onClick={() => setView('gallery')}
             >
               Gallery
+            </button>
+            <button
+              className={`px-3 py-1 text-sm border-l border-gray-700 ${view === 'list' ? 'bg-mtg-surface text-white' : 'text-gray-400 hover:text-white'}`}
+              onClick={() => setView('list')}
+            >
+              List
             </button>
           </div>
           <button
@@ -216,7 +371,6 @@ export default function CollectionPage() {
             </button>
           </div>
 
-          {/* File picker or paste textarea */}
           {importFileName ? (
             <div className="flex items-center gap-3 px-3 py-2 bg-mtg-card rounded border border-gray-600">
               <span className="text-sm text-gray-200 flex-1 truncate">{importFileName}</span>
@@ -304,50 +458,46 @@ export default function CollectionPage() {
 
       {/* Add card + Scryfall filter — side by side */}
       <div className="flex gap-3 items-start flex-wrap">
-        {/* Add card */}
         <div className="flex-1 min-w-56">
           <CardAutocomplete
-            placeholder="Add card to collection..."
+            placeholder="Add card to collection... (a)"
             clearOnSelect
-            onSelect={card => setModal({ card, initialQty: 1, initialFoilQty: 0 })}
+            focusRef={addFocusRef}
+            onFocus={() => setSelectedIndex(null)}
+            onSelect={card => setPrintingPicker({ oracleId: card.oracle_id, cardName: card.name })}
           />
         </div>
 
-        {/* Filter collection */}
         <div className="flex-1 min-w-56 flex gap-2 items-center">
           <input
-            className="input flex-1"
-            placeholder="Filter: t:creature c:red..."
+            ref={filterInputRef}
+            className={`input flex-1 transition-opacity ${filterLoading ? 'opacity-50' : ''}`}
+            placeholder="Filter: t:creature c:red... (f)"
             value={filterInput}
             onChange={e => setFilterInput(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') applyFilter() }}
+            onFocus={() => setSelectedIndex(null)}
+            disabled={filterLoading}
           />
-          {filterOracleIds !== null ? (
-            <button
-              onClick={clearFilter}
-              className="btn-secondary text-sm shrink-0"
-              title="Clear filter"
-            >
+          {filterOracleIds !== null && !filterLoading ? (
+            <button onClick={clearFilter} className="btn-secondary text-sm shrink-0" title="Clear filter">
               ✕
             </button>
           ) : (
-            <button
-              onClick={applyFilter}
-              disabled={filterLoading}
-              className="btn-secondary text-sm shrink-0"
-            >
-              {filterLoading ? '…' : 'Filter'}
+            <button onClick={applyFilter} disabled={filterLoading} className="btn-secondary text-sm shrink-0 flex items-center gap-1.5">
+              {filterLoading && (
+                <svg className="animate-spin h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                </svg>
+              )}
+              {filterLoading ? 'Filtering...' : 'Filter'}
             </button>
           )}
         </div>
       </div>
 
-      {/* Filter warnings */}
-      {filterTruncated && (
-        <div className="text-xs text-yellow-400">
-          Results truncated — refine your query
-        </div>
-      )}
+      {/* Filter status */}
       {filterOracleIds !== null && (
         <div className="text-xs text-gray-400">
           Showing {filtered.length} of {cards.length} owned cards
@@ -367,75 +517,102 @@ export default function CollectionPage() {
       )}
 
       {/* List view */}
-      {view === 'list' && filtered.length > 0 && (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-gray-400 border-b border-gray-700">
-                <th className="pb-2 pr-4">Card</th>
-                <th className="pb-2 pr-4">Set</th>
-                <th className="pb-2 pr-4">Qty</th>
-                <th className="pb-2 pr-4">Price</th>
-                <th className="pb-2 pr-4">Usage</th>
-                <th className="pb-2"></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-800">
-              {filtered.map(card => {
-                const deckCount = card._ownership?.decks?.length ?? 0
-                const deckTitle = card._ownership?.decks?.map(d => `${d.deck_name} ×${d.quantity}`).join(', ')
-                return (
-                  <tr
-                    key={card.id}
-                    className="hover:bg-mtg-surface/50 cursor-pointer"
-                    onClick={() => openModalForEntry(card)}
-                  >
-                    <td className="py-2 pr-4 font-medium">{card.name}</td>
-                    <td className="py-2 pr-4 text-gray-400">
-                      {card.set_code?.toUpperCase()} #{card.collector_number}
-                    </td>
-                    <td className="py-2 pr-4">
-                      {card.quantity > 0 ? `${card.quantity}` : ''}
-                      {card.quantity > 0 && card.foil_quantity > 0 ? ' + ' : ''}
-                      {card.foil_quantity > 0 ? `${card.foil_quantity}✨` : ''}
-                    </td>
-                    <td className="py-2 pr-4 text-mtg-gold">
-                      {card.prices?.usd ? `$${card.prices.usd}` : '—'}
-                    </td>
-                    <td className="py-2 pr-4" title={deckTitle}>
-                      {deckCount > 0 ? (
-                        <span className="text-blue-400 cursor-default">
-                          {deckCount} deck{deckCount !== 1 ? 's' : ''}
-                        </span>
-                      ) : '—'}
-                    </td>
-                    <td className="py-2">
-                      <button
-                        onClick={e => { e.stopPropagation(); removeMutation.mutate(card.scryfall_id) }}
-                        className="text-xs text-gray-600 hover:text-red-400 transition-colors"
-                      >
-                        ✕
-                      </button>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
+      {view === 'list' && pagedCards.length > 0 && (
+        <>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-gray-400 border-b border-gray-700">
+                  <th className="pb-2 pr-4">Card</th>
+                  <th className="pb-2 pr-4">Set</th>
+                  <th className="pb-2 pr-4">Qty</th>
+                  <th className="pb-2 pr-4">Price</th>
+                  <th className="pb-2 pr-4">Usage</th>
+                  <th className="pb-2"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-800">
+                {pagedCards.map((card, i) => {
+                  const deckCount = card._ownership?.decks?.length ?? 0
+                  const deckTitle = card._ownership?.decks?.map(d => `${d.deck_name} ×${d.quantity}`).join(', ')
+                  const isSelected = selectedIndex === i
+                  return (
+                    <tr
+                      key={card.id}
+                      data-card-index={i}
+                      className={`cursor-pointer transition-colors ${isSelected ? 'bg-blue-950/60' : 'hover:bg-mtg-surface/50'}`}
+                      onClick={() => setSelectedIndex(i)}
+                      onDoubleClick={() => openModalForEntry(card)}
+                    >
+                      <td className="py-2 pr-4 font-medium">{card.name}</td>
+                      <td className="py-2 pr-4 text-gray-400">
+                        {card.set_code?.toUpperCase()} #{card.collector_number}
+                      </td>
+                      <td className="py-2 pr-4">
+                        {card.quantity > 0 ? `${card.quantity}` : ''}
+                        {card.quantity > 0 && card.foil_quantity > 0 ? ' + ' : ''}
+                        {card.foil_quantity > 0 ? `${card.foil_quantity}✨` : ''}
+                      </td>
+                      <td className="py-2 pr-4 text-mtg-gold">
+                        {card.prices?.usd ? `$${card.prices.usd}` : '—'}
+                      </td>
+                      <td className="py-2 pr-4" title={deckTitle}>
+                        {deckCount > 0 ? (
+                          <span className="text-blue-400 cursor-default">
+                            {deckCount} deck{deckCount !== 1 ? 's' : ''}
+                          </span>
+                        ) : <span className="text-gray-700">—</span>}
+                      </td>
+                      <td className="py-2">
+                        <button
+                          onClick={e => { e.stopPropagation(); removeMutation.mutate(card.scryfall_id) }}
+                          className="text-xs text-gray-600 hover:text-red-400 transition-colors"
+                        >
+                          ✕
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+          <Pagination page={safePage} totalPages={totalPages} onChange={handlePageChange} />
+        </>
       )}
 
       {/* Gallery view */}
-      {view === 'gallery' && filtered.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-          {filtered.map(card => (
-            <CollectionTile
-              key={card.id}
-              card={card}
-              onClick={() => openModalForEntry(card)}
-            />
-          ))}
-        </div>
+      {view === 'gallery' && pagedCards.length > 0 && (
+        <>
+          <div
+            ref={gridRef}
+            className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3"
+          >
+            {pagedCards.map((card, i) => (
+              <CollectionTile
+                key={card.id}
+                card={card}
+                index={i}
+                selected={selectedIndex === i}
+                onClick={() => setSelectedIndex(i)}
+                onDoubleClick={() => openModalForEntry(card)}
+              />
+            ))}
+          </div>
+          <Pagination page={safePage} totalPages={totalPages} onChange={handlePageChange} />
+        </>
+      )}
+
+      {printingPicker && (
+        <PrintingPickerModal
+          oracle_id={printingPicker.oracleId}
+          cardName={printingPicker.cardName}
+          onClose={() => setPrintingPicker(null)}
+          onSelect={card => {
+            setPrintingPicker(null)
+            setModal({ card, initialQty: 1, initialFoilQty: 0, isExisting: false })
+          }}
+        />
       )}
 
       {modal && (
@@ -443,6 +620,7 @@ export default function CollectionPage() {
           card={modal.card}
           initialQty={modal.initialQty}
           initialFoilQty={modal.initialFoilQty}
+          isExisting={modal.isExisting}
           onClose={() => setModal(null)}
         />
       )}

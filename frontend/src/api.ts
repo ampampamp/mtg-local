@@ -8,6 +8,9 @@ export default api
 export const autocompleteCards = (q: string, limit = 20) =>
   api.get('/cards/autocomplete', { params: { q, limit } }).then(r => r.data)
 
+export const getCardPrintings = (oracle_id: string) =>
+  api.get('/cards/printings', { params: { oracle_id } }).then(r => r.data)
+
 export const searchCards = (q: string, page = 1, order = 'name') =>
   api.get('/cards/search', { params: { q, page, order } }).then(r => r.data)
 

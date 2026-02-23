@@ -10,8 +10,11 @@ interface Props {
   autoFocus?: boolean
   clearOnSelect?: boolean
   className?: string
-  // If provided, renders as an inline input without absolute positioning
   inline?: boolean
+  /** Assign a function to this ref to programmatically focus the input */
+  focusRef?: React.MutableRefObject<(() => void) | null>
+  /** Called when the input receives focus */
+  onFocus?: () => void
 }
 
 function useDebounce<T>(value: T, delay: number): T {
@@ -55,6 +58,8 @@ export default function CardAutocomplete({
   autoFocus = false,
   clearOnSelect = false,
   className,
+  focusRef,
+  onFocus,
 }: Props) {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<ScryfallCard[]>([])
@@ -62,6 +67,8 @@ export default function CardAutocomplete({
   const [open, setOpen] = useState(false)
   const [highlighted, setHighlighted] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
+  // Expose focus to parent via focusRef
+  if (focusRef) focusRef.current = () => inputRef.current?.focus()
   const listRef = useRef<HTMLUListElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const debouncedQuery = useDebounce(query, 150)
@@ -141,7 +148,7 @@ export default function CardAutocomplete({
           type="text"
           value={query}
           onChange={e => setQuery(e.target.value)}
-          onFocus={() => results.length > 0 && setOpen(true)}
+          onFocus={() => { if (results.length > 0) setOpen(true); onFocus?.() }}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
           autoFocus={autoFocus}
@@ -181,9 +188,9 @@ export default function CardAutocomplete({
               )}
             >
               {/* Tiny card image */}
-              {card.image_uris?.normal || (card.card_faces?.[0]?.image_uris?.normal) ? (
+              {card.image_uri ? (
                 <img
-                  src={card.image_uris?.normal ?? card.card_faces![0].image_uris!.normal}
+                  src={card.image_uri}
                   alt=""
                   className="w-8 h-11 rounded object-cover flex-shrink-0"
                   loading="lazy"

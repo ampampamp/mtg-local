@@ -16,12 +16,16 @@ export interface ScryfallCard {
   type_line?: string
   oracle_text?: string
   colors?: string[]
+  image_uri?: string
   image_uris?: { normal: string; small: string; art_crop: string }
   card_faces?: { name: string; image_uris?: { normal: string } }[]
   set: string
   set_name: string
   collector_number: string
   prices?: { usd?: string; usd_foil?: string }
+  scryfall_uri?: string
+  related_uris?: { edhrec?: string; [key: string]: string | undefined }
+  purchase_uris?: { tcgplayer?: string; [key: string]: string | undefined }
   _ownership?: Ownership
 }
 
@@ -38,6 +42,9 @@ export interface CollectionEntry {
   image_uri?: string
   prices?: { usd?: string; usd_foil?: string }
   set_name: string
+  scryfall_uri?: string
+  related_uris?: { edhrec?: string; [key: string]: string | undefined }
+  purchase_uris?: { tcgplayer?: string; [key: string]: string | undefined }
   _ownership?: Ownership
 }
 
