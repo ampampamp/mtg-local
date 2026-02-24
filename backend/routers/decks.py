@@ -292,20 +292,32 @@ async def import_decklist(deck_id: int, body: ImportDecklist, db: AsyncSession =
         if line.startswith("//") or line.startswith("#"):
             continue
 
-        match = re.match(r"^(\d+)x?\s+(.+?)(?:\s+\([A-Z0-9]+\)\s+\d+)?$", line, re.IGNORECASE)
+        # Try "1 Card Name (SET) 123" first, fall back to "1 Card Name"
+        full_match = re.match(r"^(\d+)x?\s+(.+?)\s+\(([A-Z0-9]+)\)\s+(\d+)\s*$", line, re.IGNORECASE)
+        simple_match = re.match(r"^(\d+)x?\s+(.+?)\s*$", line, re.IGNORECASE)
+        match = full_match or simple_match
         if not match:
             failed.append({"line": line, "reason": "Could not parse"})
             continue
 
         qty = int(match.group(1))
         name = match.group(2).strip()
-
         oracle_id, scryfall_id = None, None
-        for c in card_store.cards_by_oracle.values():
-            if c.get("name", "").lower() == name.lower():
-                oracle_id = c.get("oracle_id")
-                scryfall_id = c.get("id")
-                break
+
+        if full_match:
+            card_data = card_store.get_by_set_collector(full_match.group(3), full_match.group(4))
+            if card_data:
+                oracle_id = card_data.get("oracle_id")
+                scryfall_id = card_data.get("id")
+                name = card_data.get("name", name)
+
+        # Fall back to name lookup if set+collector not found or not provided
+        if not oracle_id:
+            for c in card_store.cards_by_oracle.values():
+                if c.get("name", "").lower() == name.lower():
+                    oracle_id = c.get("oracle_id")
+                    scryfall_id = c.get("id")
+                    break
 
         if not oracle_id:
             failed.append({"line": line, "reason": f"Card '{name}' not found"})
