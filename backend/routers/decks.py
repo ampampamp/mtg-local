@@ -205,6 +205,7 @@ async def update_deck(deck_id: int, body: CreateDeck, db: AsyncSession = Depends
 
 @router.delete("/{deck_id}")
 async def delete_deck(deck_id: int, db: AsyncSession = Depends(get_db)):
+    await db.execute(delete(DeckCard).where(DeckCard.deck_id == deck_id))
     await db.execute(delete(Deck).where(Deck.id == deck_id))
     await db.commit()
     return {"status": "deleted"}
