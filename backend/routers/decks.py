@@ -22,6 +22,7 @@ class CreateDeck(BaseModel):
     name: str
     format: str = "commander"
     description: str = ""
+    decklist: str = ""
 
 
 class UpsertDeckCard(BaseModel):
@@ -57,10 +58,70 @@ async def list_decks(db: AsyncSession = Depends(get_db)):
     ]}
 
 
+def _parse_decklist(text: str, deck_id: int, board: str) -> tuple[list[DeckCard], list[dict]]:
+    """Parse a decklist text and return (cards_to_add, failed_lines)."""
+    imported_cards, failed = [], []
+    lines = [l.strip() for l in text.strip().splitlines() if l.strip()]
+    seen: dict[tuple, DeckCard] = {}  # (oracle_id, board) -> DeckCard
+
+    for line in lines:
+        if line.startswith("//") or line.startswith("#"):
+            continue
+
+        line = re.sub(r'\s*\*[^*]+\*\s*$', '', line).strip()
+
+        full_match = re.match(r"^(\d+)x?\s+(.+?)\s+\(([A-Z0-9]+)\)\s+([A-Z0-9-]+)\s*$", line, re.IGNORECASE)
+        simple_match = re.match(r"^(\d+)x?\s+(.+?)\s*$", line, re.IGNORECASE)
+        match = full_match or simple_match
+        if not match:
+            failed.append({"line": line, "reason": "Could not parse"})
+            continue
+
+        qty = int(match.group(1))
+        name = match.group(2).strip()
+        oracle_id, scryfall_id = None, None
+
+        if full_match:
+            card_data = card_store.get_by_set_collector(full_match.group(3), full_match.group(4))
+            if card_data:
+                oracle_id = card_data.get("oracle_id")
+                scryfall_id = card_data.get("id")
+                name = card_data.get("name", name)
+
+        if not oracle_id:
+            for c in card_store.cards_by_oracle.values():
+                if c.get("name", "").lower() == name.lower():
+                    oracle_id = c.get("oracle_id")
+                    scryfall_id = c.get("id")
+                    break
+
+        if not oracle_id:
+            failed.append({"line": line, "reason": f"Card '{name}' not found"})
+            continue
+
+        key = (oracle_id, board)
+        if key in seen:
+            seen[key].quantity += qty
+        else:
+            dc = DeckCard(deck_id=deck_id, oracle_id=oracle_id, scryfall_id=scryfall_id,
+                          name=name, quantity=qty, board=board)
+            seen[key] = dc
+            imported_cards.append(dc)
+
+    return imported_cards, failed
+
+
 @router.post("")
 async def create_deck(body: CreateDeck, db: AsyncSession = Depends(get_db)):
     deck = Deck(name=body.name, format=body.format, description=body.description)
     db.add(deck)
+    await db.flush()  # get deck.id without committing
+
+    if body.decklist.strip():
+        cards, _ = _parse_decklist(body.decklist, deck.id, "mainboard")
+        for card in cards:
+            db.add(card)
+
     await db.commit()
     await db.refresh(deck)
     return {"id": deck.id, "name": deck.name}
@@ -292,8 +353,12 @@ async def import_decklist(deck_id: int, body: ImportDecklist, db: AsyncSession =
         if line.startswith("//") or line.startswith("#"):
             continue
 
+        # Strip foil/finish markers like *F*, *E* before parsing
+        line = re.sub(r'\s*\*[^*]+\*\s*$', '', line).strip()
+
         # Try "1 Card Name (SET) 123" first, fall back to "1 Card Name"
-        full_match = re.match(r"^(\d+)x?\s+(.+?)\s+\(([A-Z0-9]+)\)\s+(\d+)\s*$", line, re.IGNORECASE)
+        # Collector numbers can be alphanumeric+hyphen e.g. A25-92, CON-115
+        full_match = re.match(r"^(\d+)x?\s+(.+?)\s+\(([A-Z0-9]+)\)\s+([A-Z0-9-]+)\s*$", line, re.IGNORECASE)
         simple_match = re.match(r"^(\d+)x?\s+(.+?)\s*$", line, re.IGNORECASE)
         match = full_match or simple_match
         if not match:

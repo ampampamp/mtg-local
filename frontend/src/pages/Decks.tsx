@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, Link } from 'react-router-dom'
-import { getDecks, createDeck, deleteDeck, importDecklist } from '../api'
+import { getDecks, createDeck, deleteDeck } from '../api'
 import type { Deck } from '../types'
 
 export default function DecksPage() {
@@ -16,13 +16,12 @@ export default function DecksPage() {
   const { data } = useQuery({ queryKey: ['decks'], queryFn: getDecks })
 
   const createMutation = useMutation({
-    mutationFn: async () => {
-      const result = await createDeck({ name: newName.trim(), format: 'commander', description: '' })
-      if (importText.trim()) {
-        await importDecklist(result.id, importText.trim())
-      }
-      return result
-    },
+    mutationFn: () => createDeck({
+      name: newName.trim(),
+      format: 'commander',
+      description: '',
+      decklist: importText.trim(),
+    }),
     onSuccess: result => {
       qc.invalidateQueries({ queryKey: ['decks'] })
       navigate(`/decks/${result.id}`)

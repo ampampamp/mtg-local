@@ -35,7 +35,7 @@ export const importCollection = (csv: string, mode: 'append' | 'replace' = 'appe
 export const getDecks = () =>
   api.get('/decks').then(r => r.data)
 
-export const createDeck = (data: { name: string; format: string; description: string }) =>
+export const createDeck = (data: { name: string; format: string; description: string; decklist?: string }) =>
   api.post('/decks', data).then(r => r.data)
 
 export const getDeck = (id: number) =>
