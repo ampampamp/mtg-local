@@ -126,19 +126,10 @@ export default function CollectionPage() {
 
   // Scryfall filter state
   const [filterInput, setFilterInput] = useState('')
-  const [filterOracleIds, setFilterOracleIds] = useState<Set<string> | null>(null)
+  const [filterIds, setFilterIds] = useState<Set<string> | null>(null) // scryfall_ids
   const [filterLoading, setFilterLoading] = useState(false)
   const [filterLoadingMore, setFilterLoadingMore] = useState(false)
   const filterQueryId = useRef(0)
-  // Mutable state for the active filter's pagination (avoids stale closures)
-  const filterRef = useRef<{
-    queryId: number
-    query: string
-    nextPage: number
-    allIds: Set<string>
-    hasMore: boolean
-    fetching: boolean
-  } | null>(null)
 
   const gridRef = useRef<HTMLDivElement>(null)
   const addFocusRef = useRef<(() => void) | null>(null)
@@ -152,12 +143,9 @@ export default function CollectionPage() {
   })
 
   const cards: CollectionEntry[] = data?.data ?? []
-  // Keep a ref so ensureFilterCoverage can compute filtered count without stale closures
-  const cardsRef = useRef<CollectionEntry[]>([])
-  cardsRef.current = cards
 
-  const filtered = filterOracleIds
-    ? cards.filter(c => c.oracle_id && filterOracleIds.has(c.oracle_id))
+  const filtered = filterIds
+    ? cards.filter(c => filterIds.has(c.scryfall_id))
     : cards
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
@@ -310,49 +298,11 @@ export default function CollectionPage() {
     }
   }
 
-  // Fetch more Scryfall pages until the filtered collection has enough cards for
-  // `collectionPage`, or until there are no more Scryfall pages.
-  async function ensureFilterCoverage(collectionPage: number) {
-    const state = filterRef.current
-    if (!state || !state.hasMore || state.fetching) return
-    if (state.queryId !== filterQueryId.current) return
-
-    const needed = collectionPage * PAGE_SIZE
-    const current = cardsRef.current.filter(c => c.oracle_id && state.allIds.has(c.oracle_id)).length
-    if (current >= needed) return
-
-    state.fetching = true
-    setFilterLoadingMore(true)
-
-    while (state.hasMore) {
-      if (state.queryId !== filterQueryId.current) break
-      try {
-        const result = await searchCards(state.query, state.nextPage)
-        if (state.queryId !== filterQueryId.current) break
-        ;(result.data ?? []).forEach((c: ScryfallCard) => {
-          if (c.oracle_id) state.allIds.add(c.oracle_id)
-        })
-        state.hasMore = !!result.has_more
-        state.nextPage++
-        setFilterOracleIds(new Set(state.allIds))
-        const count = cardsRef.current.filter(c => c.oracle_id && state.allIds.has(c.oracle_id)).length
-        if (count >= needed) break
-      } catch {
-        state.hasMore = false
-        break
-      }
-    }
-
-    state.fetching = false
-    setFilterLoadingMore(false)
-  }
-
   async function applyFilter() {
     if (!filterInput.trim()) { clearFilter(); return }
 
     const queryId = ++filterQueryId.current
     const query = filterInput.trim()
-    filterRef.current = null
     setFilterLoading(true)
 
     try {
@@ -360,27 +310,38 @@ export default function CollectionPage() {
       if (queryId !== filterQueryId.current) return
 
       const allIds = new Set<string>()
-      ;(first.data ?? []).forEach((c: ScryfallCard) => {
-        if (c.oracle_id) allIds.add(c.oracle_id)
-      })
-      filterRef.current = { queryId, query, nextPage: 2, allIds, hasMore: !!first.has_more, fetching: false }
-      setFilterOracleIds(new Set(allIds))
+      ;(first.data ?? []).forEach((c: ScryfallCard) => { if (c.id) allIds.add(c.id) })
+      setFilterIds(new Set(allIds))
       setPage(1)
       setSelectedIndex(null)
       setFilterLoading(false)
 
-      // Ensure we have enough results for page 1 of the collection
-      await ensureFilterCoverage(1)
+      if (!first.has_more) return
+
+      // Eagerly fetch pages 2–5 in the background
+      setFilterLoadingMore(true)
+      for (let p = 2; p <= 5; p++) {
+        if (queryId !== filterQueryId.current) break
+        try {
+          const result = await searchCards(query, p)
+          if (queryId !== filterQueryId.current) break
+          ;(result.data ?? []).forEach((c: ScryfallCard) => { if (c.id) allIds.add(c.id) })
+          setFilterIds(new Set(allIds))
+          if (!result.has_more) break
+        } catch {
+          break
+        }
+      }
+      if (queryId === filterQueryId.current) setFilterLoadingMore(false)
     } catch {
       if (queryId === filterQueryId.current) setFilterLoading(false)
     }
   }
 
   function clearFilter() {
-    filterQueryId.current++ // cancels any in-flight ensureFilterCoverage
-    filterRef.current = null
+    filterQueryId.current++
     setFilterInput('')
-    setFilterOracleIds(null)
+    setFilterIds(null)
     setFilterLoadingMore(false)
     setPage(1)
     setSelectedIndex(null)
@@ -389,7 +350,6 @@ export default function CollectionPage() {
   function handlePageChange(p: number) {
     setPage(p)
     setSelectedIndex(null)
-    ensureFilterCoverage(p)
   }
 
   return (
@@ -542,7 +502,7 @@ export default function CollectionPage() {
             onFocus={() => setSelectedIndex(null)}
             disabled={filterLoading}
           />
-          {filterOracleIds !== null && !filterLoading ? (
+          {filterIds !== null && !filterLoading ? (
             <button onClick={clearFilter} className="btn-secondary text-sm shrink-0" title="Clear filter">
               ✕
             </button>
@@ -561,7 +521,7 @@ export default function CollectionPage() {
       </div>
 
       {/* Filter status */}
-      {filterOracleIds !== null && (
+      {filterIds !== null && (
         <div className="flex items-center gap-2 text-xs text-gray-400">
           <span>Showing {filtered.length} of {cards.length} owned cards</span>
           {filterLoadingMore && (
@@ -578,9 +538,9 @@ export default function CollectionPage() {
       {!isLoading && filtered.length === 0 && (
         <div className="text-center text-gray-600 mt-16">
           <div className="text-4xl mb-2">📦</div>
-          <div className="text-lg">{filterOracleIds !== null ? 'No matching cards in collection' : 'Your collection is empty'}</div>
+          <div className="text-lg">{filterIds !== null ? 'No matching cards in collection' : 'Your collection is empty'}</div>
           <div className="text-sm mt-1">
-            {filterOracleIds !== null ? 'Try a different filter or clear it' : 'Search for cards above or import a Moxfield CSV'}
+            {filterIds !== null ? 'Try a different filter or clear it' : 'Search for cards above or import a Moxfield CSV'}
           </div>
         </div>
       )}
