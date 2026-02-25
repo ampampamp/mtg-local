@@ -1,22 +1,23 @@
 import { useQuery } from '@tanstack/react-query'
 import { getCardPrintings } from '../api'
 import type { ScryfallCard } from '../types'
-import OwnershipBadge from './OwnershipBadge'
 
 interface Props {
   oracle_id: string
   cardName: string
   onSelect: (card: ScryfallCard) => void
   onClose: () => void
+  hidePrices?: boolean
 }
 
-export default function PrintingPickerModal({ oracle_id, cardName, onSelect, onClose }: Props) {
+export default function PrintingPickerModal({ oracle_id, cardName, onSelect, onClose, hidePrices = false }: Props) {
   const { data, isLoading } = useQuery({
     queryKey: ['printings', oracle_id],
     queryFn: () => getCardPrintings(oracle_id),
   })
 
   const printings: ScryfallCard[] = data?.data ?? []
+  const ownership = printings[0]?._ownership
 
   return (
     <div
@@ -27,9 +28,21 @@ export default function PrintingPickerModal({ oracle_id, cardName, onSelect, onC
         className="bg-mtg-surface rounded-xl p-5 w-full max-w-3xl shadow-2xl mx-4"
         onClick={e => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-bold">{cardName}</h2>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-300 text-sm">✕</button>
+        {/* Header */}
+        <div className="flex items-start justify-between mb-4 gap-4">
+          <div>
+            <h2 className="text-lg font-bold">{cardName}</h2>
+            {ownership && (
+              <div className="text-xs text-gray-400 mt-0.5 space-x-2">
+                <span>Owned: <span className="text-gray-200">{ownership.owned}</span></span>
+                <span>·</span>
+                <span>In use: <span className="text-gray-200">{ownership.in_use}</span></span>
+                <span>·</span>
+                <span>Available: <span className={ownership.available > 0 ? 'text-green-400' : 'text-gray-200'}>{ownership.available}</span></span>
+              </div>
+            )}
+          </div>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-300 text-sm flex-shrink-0">✕</button>
         </div>
 
         {isLoading && (
@@ -59,10 +72,12 @@ export default function PrintingPickerModal({ oracle_id, cardName, onSelect, onC
                   </div>
                   <div className="text-xs text-gray-500 truncate">{p.set_name}</div>
                   <div className="flex items-center justify-between gap-1">
-                    {p.prices?.usd && (
+                    {!hidePrices && p.prices?.usd && (
                       <span className="text-xs text-mtg-gold">${p.prices.usd}</span>
                     )}
-                    <OwnershipBadge ownership={p._ownership} />
+                    {(p._printing_owned ?? 0) > 0 && (
+                      <span className="text-xs text-green-400 font-medium ml-auto">×{p._printing_owned} owned</span>
+                    )}
                   </div>
                 </div>
               </button>

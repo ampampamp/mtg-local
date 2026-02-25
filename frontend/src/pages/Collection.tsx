@@ -301,8 +301,20 @@ export default function CollectionPage() {
   async function applyFilter() {
     if (!filterInput.trim()) { clearFilter(); return }
 
-    const queryId = ++filterQueryId.current
     const query = filterInput.trim()
+
+    // No Scryfall syntax → local name search against the loaded collection
+    const isScryfallSyntax = /[:=<>]/.test(query)
+    if (!isScryfallSyntax) {
+      const q = query.toLowerCase()
+      const ids = new Set(cards.filter(c => c.name.toLowerCase().includes(q)).map(c => c.scryfall_id))
+      setFilterIds(ids)
+      setPage(1)
+      setSelectedIndex(null)
+      return
+    }
+
+    const queryId = ++filterQueryId.current
     setFilterLoading(true)
 
     try {
@@ -495,7 +507,7 @@ export default function CollectionPage() {
           <input
             ref={filterInputRef}
             className={`input flex-1 transition-opacity ${filterLoading ? 'opacity-50' : ''}`}
-            placeholder="Filter: t:creature c:red... (f)"
+            placeholder="Filter by name or Scryfall syntax: t:creature, usd>5... (f)"
             value={filterInput}
             onChange={e => setFilterInput(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') applyFilter() }}

@@ -1,7 +1,10 @@
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sqlalchemy import select
+
 from db import get_db
+from models import CollectionCard
 from scryfall.search import search_cards
 from scryfall.annotate import annotate_cards
 from scryfall.store import card_store
@@ -99,6 +102,15 @@ async def get_printings(
         raise HTTPException(status_code=404, detail="No printings found")
     printings = sorted(printings, key=lambda c: c.get("released_at", ""), reverse=True)
     annotated = await annotate_cards(printings, db)
+
+    # Per-printing owned quantity (scryfall_id specific)
+    scryfall_ids = [c.get("id") for c in annotated if c.get("id")]
+    coll_result = await db.execute(
+        select(CollectionCard.scryfall_id, CollectionCard.quantity, CollectionCard.foil_quantity)
+        .where(CollectionCard.scryfall_id.in_(scryfall_ids))
+    )
+    printing_qty = {row.scryfall_id: row.quantity + row.foil_quantity for row in coll_result}
+
     return {
         "data": [
             {
@@ -115,6 +127,7 @@ async def get_printings(
                 "related_uris": {"edhrec": (c.get("related_uris") or {}).get("edhrec")},
                 "purchase_uris": {"tcgplayer": (c.get("purchase_uris") or {}).get("tcgplayer")},
                 "_ownership": c.get("_ownership"),
+                "_printing_owned": printing_qty.get(c.get("id"), 0),
             }
             for c in annotated
         ]

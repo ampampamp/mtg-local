@@ -3,7 +3,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, func
 from sqlalchemy.orm import selectinload
 
 from db import get_db
@@ -15,7 +15,7 @@ router = APIRouter()
 
 FORMATS = ["commander", "modern", "standard", "legacy", "vintage", "pioneer",
            "pauper", "draft", "sealed", "custom"]
-BOARDS = ["mainboard", "sideboard", "maybeboard"]
+BOARDS = ["mainboard", "sideboard", "maybeboard", "commander"]
 
 
 class CreateDeck(BaseModel):
@@ -23,6 +23,7 @@ class CreateDeck(BaseModel):
     format: str = "commander"
     description: str = ""
     decklist: str = ""
+    commander_scryfall_id: str = ""
 
 
 class UpsertDeckCard(BaseModel):
@@ -46,15 +47,26 @@ class ImportDecklist(BaseModel):
 
 @router.get("")
 async def list_decks(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Deck).order_by(Deck.updated_at.desc()))
-    decks = result.scalars().all()
+    count_sub = (
+        select(DeckCard.deck_id, func.sum(DeckCard.quantity).label("card_count"))
+        .where(DeckCard.board == "mainboard")
+        .group_by(DeckCard.deck_id)
+        .subquery()
+    )
+    result = await db.execute(
+        select(Deck, count_sub.c.card_count)
+        .outerjoin(count_sub, Deck.id == count_sub.c.deck_id)
+        .order_by(Deck.updated_at.desc())
+    )
+    rows = result.all()
     return {"data": [
         {
             "id": d.id, "name": d.name, "format": d.format,
             "description": d.description,
+            "card_count": card_count or 0,
             "created_at": d.created_at, "updated_at": d.updated_at,
         }
-        for d in decks
+        for d, card_count in rows
     ]}
 
 
@@ -115,16 +127,61 @@ def _parse_decklist(text: str, deck_id: int, board: str) -> tuple[list[DeckCard]
 async def create_deck(body: CreateDeck, db: AsyncSession = Depends(get_db)):
     deck = Deck(name=body.name, format=body.format, description=body.description)
     db.add(deck)
-    await db.flush()  # get deck.id without committing
+    await db.flush()
+
+    commander_oracle_id = None
+    if body.commander_scryfall_id.strip():
+        card_data = card_store.get_by_id(body.commander_scryfall_id)
+        if card_data:
+            commander_oracle_id = card_data.get("oracle_id")
+            db.add(DeckCard(
+                deck_id=deck.id,
+                oracle_id=commander_oracle_id,
+                scryfall_id=body.commander_scryfall_id,
+                name=card_data.get("name", ""),
+                quantity=1,
+                board="commander",
+            ))
 
     if body.decklist.strip():
         cards, _ = _parse_decklist(body.decklist, deck.id, "mainboard")
         for card in cards:
+            # Don't duplicate the commander in mainboard
+            if commander_oracle_id and card.oracle_id == commander_oracle_id:
+                continue
             db.add(card)
 
     await db.commit()
     await db.refresh(deck)
     return {"id": deck.id, "name": deck.name}
+
+
+@router.put("/{deck_id}/commander")
+async def set_commander(deck_id: int, body: UpsertDeckCard, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Deck).where(Deck.id == deck_id))
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Deck not found")
+
+    oracle_id = body.oracle_id
+    scryfall_id = body.scryfall_id
+    if not oracle_id and scryfall_id:
+        card_data = card_store.get_by_id(scryfall_id)
+        if card_data:
+            oracle_id = card_data.get("oracle_id")
+    if not oracle_id:
+        raise HTTPException(status_code=404, detail="Card not found")
+
+    await db.execute(delete(DeckCard).where(DeckCard.deck_id == deck_id, DeckCard.board == "commander"))
+    db.add(DeckCard(
+        deck_id=deck_id,
+        oracle_id=oracle_id,
+        scryfall_id=scryfall_id,
+        name=body.name,
+        quantity=1,
+        board="commander",
+    ))
+    await db.commit()
+    return {"status": "ok"}
 
 
 @router.get("/{deck_id}")

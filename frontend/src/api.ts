@@ -35,8 +35,11 @@ export const importCollection = (csv: string, mode: 'append' | 'replace' = 'appe
 export const getDecks = () =>
   api.get('/decks').then(r => r.data)
 
-export const createDeck = (data: { name: string; format: string; description: string; decklist?: string }) =>
+export const createDeck = (data: { name: string; format: string; description: string; decklist?: string; commander_scryfall_id?: string }) =>
   api.post('/decks', data).then(r => r.data)
+
+export const setCommander = (deckId: number, data: { name: string; oracle_id: string; scryfall_id: string }) =>
+  api.put(`/decks/${deckId}/commander`, { ...data, quantity: 1, board: 'commander' }).then(r => r.data)
 
 export const getDeck = (id: number) =>
   api.get(`/decks/${id}`).then(r => r.data)

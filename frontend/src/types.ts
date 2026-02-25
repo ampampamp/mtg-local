@@ -27,6 +27,7 @@ export interface ScryfallCard {
   related_uris?: { edhrec?: string; [key: string]: string | undefined }
   purchase_uris?: { tcgplayer?: string; [key: string]: string | undefined }
   _ownership?: Ownership
+  _printing_owned?: number
 }
 
 export interface CollectionEntry {
@@ -53,6 +54,7 @@ export interface Deck {
   name: string
   format: string
   description: string
+  card_count: number
   created_at: string
   updated_at: string
 }
