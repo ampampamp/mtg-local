@@ -27,7 +27,7 @@ async def annotate_cards(cards: list[dict], db: AsyncSession) -> list[dict]:
             "owned": total_owned,
             "owned_normal": owned["qty"],
             "owned_foil": owned["foil_qty"],
-            "in_use": min(total_in_use, total_owned),
+            "in_use": total_in_use,
             "available": max(0, total_owned - total_in_use),
             "decks": usage,
         }

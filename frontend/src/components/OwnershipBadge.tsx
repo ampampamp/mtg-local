@@ -1,11 +1,15 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import type { Ownership } from '../types'
 import clsx from 'clsx'
 
 interface Props {
   ownership?: Ownership
-  needed?: number // quantity needed by current deck
+  needed?: number
 }
+
+// Module-level tracker so only one popover is open at a time
+let closeActive: (() => void) | null = null
 
 export default function OwnershipBadge({ ownership, needed = 1 }: Props) {
   const [showPopover, setShowPopover] = useState(false)
@@ -13,29 +17,41 @@ export default function OwnershipBadge({ ownership, needed = 1 }: Props) {
   if (!ownership) return null
 
   const { owned, in_use, available, decks } = ownership
-  if (owned === 0) return (
-    <span className="text-xs px-1.5 py-0.5 rounded bg-gray-700 text-gray-400">
-      not owned
-    </span>
-  )
 
   const sufficient = available >= needed
   const partial = available > 0 && available < needed
+  const availColor = needed === 0
+    ? 'text-gray-300'
+    : sufficient ? 'text-green-400' : partial ? 'text-yellow-400' : 'text-red-400'
+
+  const stats: { value: number; label: string; color: string }[] = [
+    { value: owned, label: 'owned', color: owned > 0 ? 'text-gray-200' : 'text-gray-500' },
+    { value: in_use, label: 'used', color: 'text-gray-400' },
+    { value: available, label: 'free', color: availColor },
+  ]
+
+  function handleClick() {
+    if (!showPopover) {
+      // Close whichever badge is currently open
+      if (closeActive) closeActive()
+      closeActive = () => setShowPopover(false)
+    } else {
+      closeActive = null
+    }
+    setShowPopover(v => !v)
+  }
 
   return (
     <div className="relative inline-block">
-      <button
-        onClick={() => setShowPopover(v => !v)}
-        className={clsx(
-          'text-xs px-2 py-0.5 rounded font-mono flex gap-1 items-center',
-          sufficient ? 'bg-green-900/60 text-green-300' :
-          partial    ? 'bg-yellow-900/60 text-yellow-300' :
-                       'bg-red-900/60 text-red-300'
-        )}
-      >
-        <span title="Owned">⬡ {owned}</span>
-        {in_use > 0 && <span title="In use" className="text-gray-400">· {in_use} used</span>}
-        <span title="Available">· {available} free</span>
+      <button onClick={handleClick} className="text-left">
+        <div className="flex gap-2">
+          {stats.map(s => (
+            <div key={s.label} className="text-center">
+              <div className={clsx('text-xs font-bold leading-none', s.color)}>{s.value}</div>
+              <div className="text-[10px] text-gray-600 leading-none mt-0.5">{s.label}</div>
+            </div>
+          ))}
+        </div>
       </button>
 
       {showPopover && decks.length > 0 && (
@@ -43,9 +59,15 @@ export default function OwnershipBadge({ ownership, needed = 1 }: Props) {
                         rounded shadow-xl p-2 min-w-48 text-xs">
           <div className="font-semibold text-gray-300 mb-1">In decks:</div>
           {decks.map(d => (
-            <div key={d.deck_id} className="flex justify-between gap-4 text-gray-400">
-              <span>{d.deck_name}</span>
-              <span>×{d.quantity}</span>
+            <div key={d.deck_id} className="flex justify-between gap-4">
+              <Link
+                to={`/decks/${d.deck_id}`}
+                className="text-blue-400 hover:text-blue-300 hover:underline truncate"
+                onClick={() => { setShowPopover(false); closeActive = null }}
+              >
+                {d.deck_name}
+              </Link>
+              <span className="text-gray-400 shrink-0">×{d.quantity}</span>
             </div>
           ))}
         </div>

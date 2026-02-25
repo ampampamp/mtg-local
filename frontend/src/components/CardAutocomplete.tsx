@@ -3,6 +3,7 @@ import clsx from 'clsx'
 import { autocompleteCards } from '../api'
 import type { ScryfallCard } from '../types'
 import OwnershipBadge from './OwnershipBadge'
+import ManaCost from './ManaCost'
 
 interface Props {
   placeholder?: string
@@ -26,31 +27,6 @@ function useDebounce<T>(value: T, delay: number): T {
   return debounced
 }
 
-function ManaSymbol({ cost }: { cost?: string }) {
-  if (!cost) return null
-  // Render mana cost as colored text badges
-  const symbols = cost.replace(/[{}]/g, ' ').trim().split(' ').filter(Boolean)
-  const colorMap: Record<string, string> = {
-    W: 'bg-yellow-100 text-yellow-900',
-    U: 'bg-blue-500 text-white',
-    B: 'bg-gray-800 text-white',
-    R: 'bg-red-600 text-white',
-    G: 'bg-green-600 text-white',
-    C: 'bg-gray-400 text-gray-900',
-  }
-  return (
-    <span className="flex gap-0.5 items-center">
-      {symbols.map((s, i) => (
-        <span key={i} className={clsx(
-          'text-xs rounded-full w-4 h-4 flex items-center justify-center font-bold leading-none',
-          colorMap[s] ?? 'bg-gray-600 text-white'
-        )}>
-          {s}
-        </span>
-      ))}
-    </span>
-  )
-}
 
 export default function CardAutocomplete({
   placeholder = 'Search cards by name...',
@@ -202,7 +178,7 @@ export default function CardAutocomplete({
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium truncate">{card.name}</span>
-                  <ManaSymbol cost={card.mana_cost} />
+                  <ManaCost cost={card.mana_cost ?? ''} className="w-3.5 h-3.5" />
                 </div>
                 <div className="text-xs text-gray-500 truncate">{card.type_line}</div>
               </div>

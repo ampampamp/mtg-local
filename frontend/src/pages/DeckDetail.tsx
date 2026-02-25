@@ -6,6 +6,7 @@ import type { DeckCard, ScryfallCard } from '../types'
 import OwnershipBadge from '../components/OwnershipBadge'
 import CardAutocomplete from '../components/CardAutocomplete'
 import PrintingPickerModal from '../components/PrintingPickerModal'
+import ManaCost from '../components/ManaCost'
 
 type TargetBoard = 'mainboard' | 'maybeboard'
 
@@ -24,35 +25,36 @@ function DeckCardTile({
   const moveLabel = board === 'mainboard' ? '→ Maybe' : '→ Main'
 
   return (
-    <div className="relative group">
-      {card.image_uri ? (
-        <img src={card.image_uri} alt={card.name} className="w-full rounded-lg" loading="lazy" />
-      ) : (
-        <div className="aspect-[2.5/3.5] bg-mtg-card rounded-lg flex items-center justify-center text-xs text-gray-500 px-2 text-center">
-          {card.name}
-        </div>
-      )}
+    <div>
+      <div className="relative group">
+        {card.image_uri ? (
+          <img src={card.image_uri} alt={card.name} className="w-full rounded-lg" loading="lazy" />
+        ) : (
+          <div className="aspect-[2.5/3.5] bg-mtg-card rounded-lg flex items-center justify-center text-xs text-gray-500 px-2 text-center">
+            {card.name}
+          </div>
+        )}
 
-      {card.quantity > 1 && (
-        <div className="absolute top-1 left-1 bg-black/80 text-white text-xs font-bold px-1.5 py-0.5 rounded">
-          ×{card.quantity}
-        </div>
-      )}
+        {card.quantity > 1 && (
+          <div className="absolute top-1 left-1 bg-black/80 text-white text-xs font-bold px-1.5 py-0.5 rounded">
+            ×{card.quantity}
+          </div>
+        )}
 
-      <div className="absolute top-1 right-1">
-        <OwnershipBadge ownership={card._ownership} needed={board === 'mainboard' ? card.quantity : 0} />
+        <div className="absolute inset-0 bg-black/60 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-end gap-1.5 pb-2 px-2">
+          <span className="text-xs text-white font-medium text-center leading-tight line-clamp-2">{card.name}</span>
+          <div className="flex gap-1">
+            <button onClick={onMove} className="text-xs bg-blue-700 hover:bg-blue-600 text-white px-1.5 py-0.5 rounded">
+              {moveLabel}
+            </button>
+            <button onClick={onRemove} className="text-xs bg-red-900 hover:bg-red-700 text-white px-1.5 py-0.5 rounded">
+              ✕
+            </button>
+          </div>
+        </div>
       </div>
-
-      <div className="absolute inset-0 bg-black/60 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-end gap-1.5 pb-2 px-2">
-        <span className="text-xs text-white font-medium text-center leading-tight line-clamp-2">{card.name}</span>
-        <div className="flex gap-1">
-          <button onClick={onMove} className="text-xs bg-blue-700 hover:bg-blue-600 text-white px-1.5 py-0.5 rounded">
-            {moveLabel}
-          </button>
-          <button onClick={onRemove} className="text-xs bg-red-900 hover:bg-red-700 text-white px-1.5 py-0.5 rounded">
-            ✕
-          </button>
-        </div>
+      <div className="mt-1 flex justify-center">
+        <OwnershipBadge ownership={card._ownership} needed={board === 'mainboard' ? card.quantity : 0} />
       </div>
     </div>
   )
@@ -69,13 +71,15 @@ export default function DeckDetail() {
   const [showMissing, setShowMissing] = useState(false)
   const [showMaybe, setShowMaybe] = useState(false)
   const [targetBoard, setTargetBoard] = useState<TargetBoard>('mainboard')
-  const [addQty, setAddQty] = useState(1)
   const [showImport, setShowImport] = useState(false)
   const [importText, setImportText] = useState('')
 
   // Commander change state
   const [changingCommander, setChangingCommander] = useState(false)
   const [commanderPicker, setCommanderPicker] = useState<{ oracleId: string; cardName: string } | null>(null)
+
+  // Add card picker
+  const [addPicker, setAddPicker] = useState<{ oracleId: string; cardName: string } | null>(null)
 
   const { data: deck, isLoading } = useQuery({
     queryKey: ['deck', deckId],
@@ -103,9 +107,9 @@ export default function DeckDetail() {
   })
 
   const addMutation = useMutation({
-    mutationFn: ({ card, board, qty }: { card: ScryfallCard; board: string; qty: number }) =>
-      upsertDeckCard(deckId, { name: card.name, oracle_id: card.oracle_id, scryfall_id: card.id, quantity: qty, board }),
-    onSuccess: invalidate,
+    mutationFn: ({ card, board }: { card: ScryfallCard; board: string }) =>
+      upsertDeckCard(deckId, { name: card.name, oracle_id: card.oracle_id, scryfall_id: card.id, quantity: 1, board }),
+    onSuccess: () => { invalidate(); setAddPicker(null) },
   })
 
   const importMutation = useMutation({
@@ -173,20 +177,22 @@ export default function DeckDetail() {
         <div className="text-xs text-yellow-600 uppercase tracking-wider font-semibold mb-3">Commander</div>
         {commander ? (
           <div className="flex gap-4 items-start">
-            {commander.image_uri ? (
-              <img src={commander.image_uri} alt={commander.name} className="w-36 rounded-lg flex-shrink-0" />
-            ) : (
-              <div className="w-36 aspect-[2.5/3.5] bg-mtg-card rounded-lg flex items-center justify-center text-xs text-gray-500 px-2 text-center">
-                {commander.name}
+            <div className="flex-shrink-0">
+              {commander.image_uri ? (
+                <img src={commander.image_uri} alt={commander.name} className="w-36 rounded-lg" />
+              ) : (
+                <div className="w-36 aspect-[2.5/3.5] bg-mtg-card rounded-lg flex items-center justify-center text-xs text-gray-500 px-2 text-center">
+                  {commander.name}
+                </div>
+              )}
+              <div className="mt-1 flex justify-center">
+                <OwnershipBadge ownership={commander._ownership} needed={1} />
               </div>
-            )}
+            </div>
             <div className="space-y-1 min-w-0">
               <div className="text-lg font-bold">{commander.name}</div>
               {commander.type_line && <div className="text-sm text-gray-400">{commander.type_line}</div>}
-              {commander.mana_cost && <div className="text-sm text-gray-500">{commander.mana_cost}</div>}
-              <div className="pt-1">
-                <OwnershipBadge ownership={commander._ownership} needed={1} />
-              </div>
+              {commander.mana_cost && <ManaCost cost={commander.mana_cost} />}
               {changingCommander ? (
                 <div className="pt-2 space-y-1 max-w-xs">
                   <CardAutocomplete
@@ -220,6 +226,17 @@ export default function DeckDetail() {
         )}
       </div>
 
+      {/* Add card printing picker */}
+      {addPicker && (
+        <PrintingPickerModal
+          oracle_id={addPicker.oracleId}
+          cardName={addPicker.cardName}
+          onSelect={printing => addMutation.mutate({ card: printing, board: targetBoard })}
+          onClose={() => setAddPicker(null)}
+          hidePrices
+        />
+      )}
+
       {/* Commander printing picker */}
       {commanderPicker && (
         <PrintingPickerModal
@@ -236,18 +253,9 @@ export default function DeckDetail() {
         <div className="flex gap-2 items-center">
           <CardAutocomplete
             placeholder="Add a card..."
-            onSelect={(card) => addMutation.mutate({ card, board: targetBoard, qty: addQty })}
+            onSelect={card => setAddPicker({ oracleId: card.oracle_id, cardName: card.name })}
             clearOnSelect
             className="flex-1"
-          />
-          <input
-            type="number"
-            min={1}
-            max={99}
-            value={addQty}
-            onChange={e => setAddQty(Math.max(1, parseInt(e.target.value) || 1))}
-            className="input w-14 text-center text-sm"
-            title="Quantity"
           />
           <div className="flex rounded-lg overflow-hidden border border-gray-600 text-xs flex-shrink-0">
             {(['mainboard', 'maybeboard'] as TargetBoard[]).map(b => (

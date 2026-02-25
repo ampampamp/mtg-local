@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { getCardPrintings } from '../api'
 import type { ScryfallCard } from '../types'
+import OwnershipBadge from './OwnershipBadge'
 
 interface Props {
   oracle_id: string
@@ -16,8 +17,11 @@ export default function PrintingPickerModal({ oracle_id, cardName, onSelect, onC
     queryFn: () => getCardPrintings(oracle_id),
   })
 
-  const printings: ScryfallCard[] = data?.data ?? []
+  const printings: ScryfallCard[] = [...(data?.data ?? [])].sort(
+    (a, b) => (b._printing_owned ?? 0) - (a._printing_owned ?? 0)
+  )
   const ownership = printings[0]?._ownership
+
 
   return (
     <div
@@ -30,17 +34,9 @@ export default function PrintingPickerModal({ oracle_id, cardName, onSelect, onC
       >
         {/* Header */}
         <div className="flex items-start justify-between mb-4 gap-4">
-          <div>
+          <div className="space-y-1">
             <h2 className="text-lg font-bold">{cardName}</h2>
-            {ownership && (
-              <div className="text-xs text-gray-400 mt-0.5 space-x-2">
-                <span>Owned: <span className="text-gray-200">{ownership.owned}</span></span>
-                <span>·</span>
-                <span>In use: <span className="text-gray-200">{ownership.in_use}</span></span>
-                <span>·</span>
-                <span>Available: <span className={ownership.available > 0 ? 'text-green-400' : 'text-gray-200'}>{ownership.available}</span></span>
-              </div>
-            )}
+            {ownership && <OwnershipBadge ownership={ownership} needed={0} />}
           </div>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-300 text-sm flex-shrink-0">✕</button>
         </div>
