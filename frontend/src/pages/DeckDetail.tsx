@@ -9,22 +9,75 @@ import PrintingPickerModal from '../components/PrintingPickerModal'
 import ManaCost from '../components/ManaCost'
 import EditDeckCardModal from '../components/EditDeckCardModal'
 
+// ── Types ─────────────────────────────────────────────────────────────────────
 type TargetBoard = 'mainboard' | 'maybeboard'
+type SortBy = 'cmc' | 'alpha'
+type Grouping = 'none' | 'type' | 'tags'
+interface CardGroup { label: string; cards: DeckCard[] }
+
+// ── Grouping / sort helpers ───────────────────────────────────────────────────
+const TYPE_ORDER = ['Creature', 'Planeswalker', 'Instant', 'Sorcery', 'Artifact', 'Enchantment', 'Land']
+
+function getCardType(typeLine = ''): string {
+  for (const t of TYPE_ORDER) if (typeLine.includes(t)) return t
+  return 'Other'
+}
+
+function sortCards(cards: DeckCard[], sortBy: SortBy): DeckCard[] {
+  return [...cards].sort((a, b) =>
+    sortBy === 'cmc'
+      ? (a.cmc ?? 0) - (b.cmc ?? 0) || a.name.localeCompare(b.name)
+      : a.name.localeCompare(b.name)
+  )
+}
+
+function groupCards(cards: DeckCard[], grouping: Grouping, sortBy: SortBy): CardGroup[] {
+  const sorted = sortCards(cards, sortBy)
+
+  if (grouping === 'none') return [{ label: '', cards: sorted }]
+
+  if (grouping === 'type') {
+    const buckets: Record<string, DeckCard[]> = Object.fromEntries(
+      [...TYPE_ORDER, 'Other'].map(t => [t, []])
+    )
+    for (const card of sorted) buckets[getCardType(card.type_line)].push(card)
+    return [...TYPE_ORDER, 'Other']
+      .filter(t => buckets[t].length > 0)
+      .map(t => ({ label: t, cards: buckets[t] }))
+  }
+
+  // tags — cards can appear in multiple sections
+  const tagMap: Record<string, DeckCard[]> = {}
+  const untagged: DeckCard[] = []
+  for (const card of sorted) {
+    const tags = card.tags ?? []
+    if (!tags.length) { untagged.push(card); continue }
+    for (const tag of tags) {
+      if (!tagMap[tag]) tagMap[tag] = []
+      tagMap[tag].push(card)
+    }
+  }
+  const sections = Object.entries(tagMap)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([label, cards]) => ({ label, cards }))
+  if (untagged.length) sections.push({ label: 'Untagged', cards: untagged })
+  return sections
+}
+
+function loadPref<T>(key: string, fallback: T): T {
+  try { return (localStorage.getItem(key) as T) ?? fallback } catch { return fallback }
+}
+function savePref(key: string, value: string) {
+  try { localStorage.setItem(key, value) } catch {}
+}
 
 // ── Card image tile ───────────────────────────────────────────────────────────
 function DeckCardTile({
-  card,
-  board,
-  index,
-  selected,
-  onRemove,
-  onMove,
-  onClick,
-  onDoubleClick,
+  card, board, navIndex, selected, onRemove, onMove, onClick, onDoubleClick,
 }: {
   card: DeckCard
   board: TargetBoard
-  index: number
+  navIndex: number
   selected: boolean
   onRemove: () => void
   onMove: () => void
@@ -35,7 +88,7 @@ function DeckCardTile({
 
   return (
     <div
-      data-card-index={index}
+      data-card-index={navIndex}
       className={`cursor-pointer rounded-lg ${selected ? 'ring-2 ring-blue-400' : ''}`}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
@@ -48,26 +101,18 @@ function DeckCardTile({
             {card.name}
           </div>
         )}
-
         {card.quantity > 1 && (
           <div className="absolute top-1 left-1 bg-black/80 text-white text-xs font-bold px-1.5 py-0.5 rounded">
             ×{card.quantity}
           </div>
         )}
-
         <div className="absolute inset-0 bg-black/60 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-end gap-1.5 pb-2 px-2">
           <span className="text-xs text-white font-medium text-center leading-tight line-clamp-2">{card.name}</span>
           <div className="flex gap-1">
-            <button
-              onClick={e => { e.stopPropagation(); onMove() }}
-              className="text-xs bg-blue-700 hover:bg-blue-600 text-white px-1.5 py-0.5 rounded"
-            >
+            <button onClick={e => { e.stopPropagation(); onMove() }} className="text-xs bg-blue-700 hover:bg-blue-600 text-white px-1.5 py-0.5 rounded">
               {moveLabel}
             </button>
-            <button
-              onClick={e => { e.stopPropagation(); onRemove() }}
-              className="text-xs bg-red-900 hover:bg-red-700 text-white px-1.5 py-0.5 rounded"
-            >
+            <button onClick={e => { e.stopPropagation(); onRemove() }} className="text-xs bg-red-900 hover:bg-red-700 text-white px-1.5 py-0.5 rounded">
               ✕
             </button>
           </div>
@@ -80,7 +125,58 @@ function DeckCardTile({
   )
 }
 
-const CARD_GRID = 'grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-7 xl:grid-cols-8 gap-2'
+// ── Section group renderer ────────────────────────────────────────────────────
+function BoardSection({
+  groups, board, navIndexMap, selectedBoard, selectedIndex,
+  onSelect, onDoubleClick, onRemove, onMove, containerRef,
+}: {
+  groups: CardGroup[]
+  board: TargetBoard
+  navIndexMap: Map<string, number>
+  selectedBoard: TargetBoard | null
+  selectedIndex: number | null
+  onSelect: (navIdx: number) => void
+  onDoubleClick: (card: DeckCard) => void
+  onRemove: (card: DeckCard) => void
+  onMove: (card: DeckCard) => void
+  containerRef: React.RefObject<HTMLDivElement | null>
+}) {
+  const CARD_GRID = 'grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-7 xl:grid-cols-8 gap-2'
+  const showHeaders = groups.length > 1 || (groups.length === 1 && groups[0].label !== '')
+
+  return (
+    <div ref={containerRef} className="space-y-4">
+      {groups.map(({ label, cards }) => (
+        <div key={label || '__flat__'}>
+          {showHeaders && (
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">{label}</span>
+              <span className="text-xs text-gray-600">{cards.reduce((s, c) => s + c.quantity, 0)}</span>
+            </div>
+          )}
+          <div className={CARD_GRID}>
+            {cards.map(card => {
+              const navIdx = navIndexMap.get(card.oracle_id) ?? 0
+              return (
+                <DeckCardTile
+                  key={`${label}-${card.id}`}
+                  card={card}
+                  board={board}
+                  navIndex={navIdx}
+                  selected={selectedBoard === board && selectedIndex === navIdx}
+                  onClick={() => onSelect(navIdx)}
+                  onDoubleClick={() => onDoubleClick(card)}
+                  onRemove={() => onRemove(card)}
+                  onMove={() => onMove(card)}
+                />
+              )
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function DeckDetail() {
@@ -101,13 +197,21 @@ export default function DeckDetail() {
   // Add card picker
   const [addPicker, setAddPicker] = useState<{ oracleId: string; cardName: string } | null>(null)
 
+  // Grouping + sort (persisted)
+  const [grouping, setGroupingState] = useState<Grouping>(() => loadPref('deck-grouping', 'type'))
+  const [sortBy, setSortByState] = useState<SortBy>(() => loadPref('deck-sort', 'cmc'))
+
+  function setGrouping(g: Grouping) { setGroupingState(g); savePref('deck-grouping', g) }
+  function setSortBy(s: SortBy) { setSortByState(s); savePref('deck-sort', s) }
+
   // Keyboard navigation + edit modal
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null)
   const [selectedBoard, setSelectedBoard] = useState<TargetBoard | null>(null)
   const [editModal, setEditModal] = useState<DeckCard | null>(null)
   const [tagFilter, setTagFilter] = useState<string | null>(null)
-  const mainGridRef = useRef<HTMLDivElement>(null)
-  const maybeGridRef = useRef<HTMLDivElement>(null)
+
+  const mainContainerRef = useRef<HTMLDivElement | null>(null)
+  const maybeContainerRef = useRef<HTMLDivElement | null>(null)
 
   const { data: deck, isLoading } = useQuery({
     queryKey: ['deck', deckId],
@@ -153,14 +257,10 @@ export default function DeckDetail() {
   const setCommanderMutation = useMutation({
     mutationFn: (card: ScryfallCard) =>
       setCommander(deckId, { name: card.name, oracle_id: card.oracle_id, scryfall_id: card.id }),
-    onSuccess: () => {
-      invalidate()
-      setChangingCommander(false)
-      setCommanderPicker(null)
-    },
+    onSuccess: () => { invalidate(); setChangingCommander(false); setCommanderPicker(null) },
   })
 
-  // Derived card arrays (computed after data loads, used in keyboard handler ref)
+  // ── Derived card arrays ──────────────────────────────────────────────────
   const commander: DeckCard | undefined = deck?.cards.find((c: DeckCard) => c.board === 'commander')
   const mainboard: DeckCard[] = deck
     ? deck.cards.filter((c: DeckCard) => c.board === 'mainboard' && c.oracle_id !== commander?.oracle_id)
@@ -168,55 +268,59 @@ export default function DeckDetail() {
   const maybeboard: DeckCard[] = deck
     ? deck.cards.filter((c: DeckCard) => c.board === 'maybeboard')
     : []
-  const sorted = [...mainboard]
-    .sort((a, b) => a.name.localeCompare(b.name))
-    .filter(c => !tagFilter || (c.tags ?? []).includes(tagFilter))
-  const sortedMaybe = [...maybeboard]
-    .sort((a, b) => a.name.localeCompare(b.name))
-    .filter(c => !tagFilter || (c.tags ?? []).includes(tagFilter))
+
+  // Apply tag filter, then group for display
+  const mainFiltered = tagFilter ? mainboard.filter(c => (c.tags ?? []).includes(tagFilter)) : mainboard
+  const maybeFiltered = tagFilter ? maybeboard.filter(c => (c.tags ?? []).includes(tagFilter)) : maybeboard
+
+  // Flat sorted arrays for keyboard navigation (always unique)
+  const mainNavSorted = sortCards(mainFiltered, sortBy)
+  const maybeNavSorted = sortCards(maybeFiltered, sortBy)
+  const mainNavIndexMap = new Map(mainNavSorted.map((c, i) => [c.oracle_id, i]))
+  const maybeNavIndexMap = new Map(maybeNavSorted.map((c, i) => [c.oracle_id, i]))
+
+  // Grouped arrays for display
+  const mainGroups = groupCards(mainFiltered, grouping, sortBy)
+  const maybeGroups = groupCards(maybeFiltered, grouping, sortBy)
 
   const openEdit = useCallback((card: DeckCard) => setEditModal(card), [])
 
-  // Stable ref for keydown handler to avoid stale closures
-  const handlerRef = useRef({ selectedIndex, selectedBoard, sorted, sortedMaybe, editModal, showMaybe, addPicker, commanderPicker })
-  handlerRef.current = { selectedIndex, selectedBoard, sorted, sortedMaybe, editModal, showMaybe, addPicker, commanderPicker }
+  // Stable ref for keydown handler
+  const handlerRef = useRef({ selectedIndex, selectedBoard, mainNavSorted, maybeNavSorted, editModal, addPicker, commanderPicker })
+  handlerRef.current = { selectedIndex, selectedBoard, mainNavSorted, maybeNavSorted, editModal, addPicker, commanderPicker }
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
-      const { selectedIndex, selectedBoard, sorted, sortedMaybe, editModal, addPicker, commanderPicker } = handlerRef.current
+      const { selectedIndex, selectedBoard, mainNavSorted, maybeNavSorted, editModal, addPicker, commanderPicker } = handlerRef.current
       const tag = (document.activeElement as HTMLElement)?.tagName?.toLowerCase()
       const inInput = tag === 'input' || tag === 'textarea' || tag === 'select'
 
       if (e.key === 'Escape') {
         ;(document.activeElement as HTMLElement)?.blur()
         if (editModal) { setEditModal(null) }
-        else if (addPicker || commanderPicker) { /* let modal handle */ }
-        else { setSelectedIndex(null); setSelectedBoard(null) }
+        else if (!addPicker && !commanderPicker) { setSelectedIndex(null); setSelectedBoard(null) }
         return
       }
 
       if (inInput) return
 
-      // Enter opens edit modal for selected card
       if (e.key === 'Enter' && selectedIndex !== null && selectedBoard && !editModal) {
         e.preventDefault()
-        const cards = selectedBoard === 'mainboard' ? sorted : sortedMaybe
+        const cards = selectedBoard === 'mainboard' ? mainNavSorted : maybeNavSorted
         const card = cards[selectedIndex]
         if (card) openEdit(card)
         return
       }
 
-      // Arrow key navigation within the active board
       if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key) && !editModal && selectedBoard) {
-        const cards = selectedBoard === 'mainboard' ? sorted : sortedMaybe
+        const cards = selectedBoard === 'mainboard' ? mainNavSorted : maybeNavSorted
         if (!cards.length) return
         e.preventDefault()
 
-        const gridRef = selectedBoard === 'mainboard' ? mainGridRef : maybeGridRef
+        const containerRef = selectedBoard === 'mainboard' ? mainContainerRef : maybeContainerRef
+        const gridEl = containerRef.current?.querySelector('.grid')
         let cols = 1
-        if (gridRef.current) {
-          cols = getComputedStyle(gridRef.current).gridTemplateColumns.split(' ').filter(Boolean).length
-        }
+        if (gridEl) cols = getComputedStyle(gridEl).gridTemplateColumns.split(' ').filter(Boolean).length
 
         const total = cards.length
         const cur = selectedIndex ?? -1
@@ -225,11 +329,9 @@ export default function DeckDetail() {
         else if (e.key === 'ArrowRight') next = cur < 0 ? 0 : Math.min(total - 1, cur + 1)
         else if (e.key === 'ArrowUp') next = cur - cols < 0 ? (cur < 0 ? 0 : cur) : cur - cols
         else if (e.key === 'ArrowDown') next = cur < 0 ? 0 : Math.min(total - 1, cur + cols)
-
         setSelectedIndex(next)
       }
     }
-
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [openEdit])
@@ -237,8 +339,8 @@ export default function DeckDetail() {
   // Scroll selected card into view
   useEffect(() => {
     if (selectedIndex === null || !selectedBoard) return
-    const gridRef = selectedBoard === 'mainboard' ? mainGridRef : maybeGridRef
-    const el = gridRef.current?.children[selectedIndex] as HTMLElement | undefined
+    const containerRef = selectedBoard === 'mainboard' ? mainContainerRef : maybeContainerRef
+    const el = containerRef.current?.querySelector(`[data-card-index="${selectedIndex}"]`) as HTMLElement | undefined
     el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
   }, [selectedIndex, selectedBoard])
 
@@ -302,20 +404,13 @@ export default function DeckDetail() {
                 <div className="pt-2 space-y-1 max-w-xs">
                   <CardAutocomplete
                     placeholder="Search for new commander..."
-                    onSelect={card => {
-                      setChangingCommander(false)
-                      setCommanderPicker({ oracleId: card.oracle_id, cardName: card.name })
-                    }}
+                    onSelect={card => { setChangingCommander(false); setCommanderPicker({ oracleId: card.oracle_id, cardName: card.name }) }}
                     className=""
                   />
-                  <button onClick={() => setChangingCommander(false)} className="text-xs text-gray-500 hover:text-gray-300">
-                    Cancel
-                  </button>
+                  <button onClick={() => setChangingCommander(false)} className="text-xs text-gray-500 hover:text-gray-300">Cancel</button>
                 </div>
               ) : (
-                <button onClick={() => setChangingCommander(true)} className="btn-secondary text-xs mt-2">
-                  Change
-                </button>
+                <button onClick={() => setChangingCommander(true)} className="btn-secondary text-xs mt-2">Change</button>
               )}
             </div>
           </div>
@@ -331,7 +426,39 @@ export default function DeckDetail() {
         )}
       </div>
 
-      {/* Add card printing picker */}
+      {/* ── Grouping + sort toggles ── */}
+      <div className="flex items-center gap-4 flex-wrap py-1">
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-500">Group</span>
+          <div className="flex rounded overflow-hidden border border-gray-700 text-xs">
+            {([['none', 'None'], ['type', 'Type'], ['tags', 'Tags']] as [Grouping, string][]).map(([val, label]) => (
+              <button
+                key={val}
+                onClick={() => setGrouping(val)}
+                className={`px-2.5 py-1 transition-colors ${grouping === val ? 'bg-mtg-accent text-white' : 'bg-mtg-card text-gray-400 hover:text-gray-200'}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-500">Sort</span>
+          <div className="flex rounded overflow-hidden border border-gray-700 text-xs">
+            {([['cmc', 'CMC'], ['alpha', 'A→Z']] as [SortBy, string][]).map(([val, label]) => (
+              <button
+                key={val}
+                onClick={() => setSortBy(val)}
+                className={`px-2.5 py-1 transition-colors ${sortBy === val ? 'bg-mtg-accent text-white' : 'bg-mtg-card text-gray-400 hover:text-gray-200'}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Modals */}
       {addPicker && (
         <PrintingPickerModal
           oracle_id={addPicker.oracleId}
@@ -341,8 +468,6 @@ export default function DeckDetail() {
           hidePrices
         />
       )}
-
-      {/* Commander printing picker */}
       {commanderPicker && (
         <PrintingPickerModal
           oracle_id={commanderPicker.oracleId}
@@ -352,8 +477,6 @@ export default function DeckDetail() {
           hidePrices
         />
       )}
-
-      {/* Edit deck card modal */}
       {editModal && (
         <EditDeckCardModal
           card={editModal}
@@ -377,9 +500,7 @@ export default function DeckDetail() {
               <button
                 key={b}
                 onClick={() => setTargetBoard(b)}
-                className={`px-2.5 py-1.5 transition-colors ${
-                  targetBoard === b ? 'bg-mtg-accent text-white' : 'bg-mtg-card text-gray-400 hover:text-gray-200'
-                }`}
+                className={`px-2.5 py-1.5 transition-colors ${targetBoard === b ? 'bg-mtg-accent text-white' : 'bg-mtg-card text-gray-400 hover:text-gray-200'}`}
               >
                 {b === 'mainboard' ? 'Main' : 'Maybe'}
               </button>
@@ -409,41 +530,39 @@ export default function DeckDetail() {
         )}
       </div>
 
-      {/* ── Mainboard grid ── */}
+      {/* ── Mainboard ── */}
       <div className="space-y-3">
-        <div className="flex items-center gap-2 border-b border-gray-700 pb-2">
+        <div className="flex items-center gap-2 border-b border-gray-700 pb-2 flex-wrap">
           <h2 className="font-semibold">Mainboard</h2>
           <span className="text-xs bg-mtg-card px-2 py-0.5 rounded-full text-gray-400">
-            {sorted.reduce((s, c) => s + c.quantity, 0)} cards
+            {mainNavSorted.reduce((s, c) => s + c.quantity, 0)} cards
           </span>
+          {tagFilter && (
+            <div className="flex items-center gap-1.5 ml-1">
+              <span className="text-xs text-gray-500">tag:</span>
+              <span className="bg-blue-900/50 text-blue-300 text-xs px-2 py-0.5 rounded-full">{tagFilter}</span>
+              <button onClick={() => { setTagFilter(null); setSelectedIndex(null) }} className="text-gray-500 hover:text-gray-300 text-xs">✕</button>
+            </div>
+          )}
         </div>
-        {tagFilter && (
-          <div className="flex items-center gap-2 text-xs">
-            <span className="text-gray-400">Tag filter:</span>
-            <span className="bg-blue-900/50 text-blue-300 px-2 py-0.5 rounded-full">{tagFilter}</span>
-            <button onClick={() => { setTagFilter(null); setSelectedIndex(null) }} className="text-gray-500 hover:text-gray-300">
-              ✕ Clear
-            </button>
-          </div>
-        )}
+
         {mainboard.length === 0 ? (
           <div className="text-center text-gray-600 py-8 text-sm">No cards yet — search above or paste a list</div>
+        ) : mainFiltered.length === 0 ? (
+          <div className="text-center text-gray-600 py-4 text-sm">No cards match this tag filter</div>
         ) : (
-          <div ref={mainGridRef} className={CARD_GRID}>
-            {sorted.map((card, i) => (
-              <DeckCardTile
-                key={card.id}
-                card={card}
-                board="mainboard"
-                index={i}
-                selected={selectedBoard === 'mainboard' && selectedIndex === i}
-                onClick={() => { setSelectedBoard('mainboard'); setSelectedIndex(i) }}
-                onDoubleClick={() => openEdit(card)}
-                onRemove={() => removeMutation.mutate({ oracleId: card.oracle_id, board: 'mainboard' })}
-                onMove={() => moveMutation.mutate({ oracleId: card.oracle_id, fromBoard: 'mainboard', toBoard: 'maybeboard' })}
-              />
-            ))}
-          </div>
+          <BoardSection
+            groups={mainGroups}
+            board="mainboard"
+            navIndexMap={mainNavIndexMap}
+            selectedBoard={selectedBoard}
+            selectedIndex={selectedIndex}
+            onSelect={idx => { setSelectedBoard('mainboard'); setSelectedIndex(idx) }}
+            onDoubleClick={openEdit}
+            onRemove={card => removeMutation.mutate({ oracleId: card.oracle_id, board: 'mainboard' })}
+            onMove={card => moveMutation.mutate({ oracleId: card.oracle_id, fromBoard: 'mainboard', toBoard: 'maybeboard' })}
+            containerRef={mainContainerRef}
+          />
         )}
       </div>
 
@@ -462,22 +581,21 @@ export default function DeckDetail() {
           <div className="mt-3">
             {maybeboard.length === 0 ? (
               <div className="text-xs text-gray-600 py-2">No cards in maybeboard</div>
+            ) : maybeFiltered.length === 0 ? (
+              <div className="text-xs text-gray-600 py-2">No cards match this tag filter</div>
             ) : (
-              <div ref={maybeGridRef} className={CARD_GRID}>
-                {sortedMaybe.map((card, i) => (
-                  <DeckCardTile
-                    key={card.id}
-                    card={card}
-                    board="maybeboard"
-                    index={i}
-                    selected={selectedBoard === 'maybeboard' && selectedIndex === i}
-                    onClick={() => { setSelectedBoard('maybeboard'); setSelectedIndex(i) }}
-                    onDoubleClick={() => openEdit(card)}
-                    onRemove={() => removeMutation.mutate({ oracleId: card.oracle_id, board: 'maybeboard' })}
-                    onMove={() => moveMutation.mutate({ oracleId: card.oracle_id, fromBoard: 'maybeboard', toBoard: 'mainboard' })}
-                  />
-                ))}
-              </div>
+              <BoardSection
+                groups={maybeGroups}
+                board="maybeboard"
+                navIndexMap={maybeNavIndexMap}
+                selectedBoard={selectedBoard}
+                selectedIndex={selectedIndex}
+                onSelect={idx => { setSelectedBoard('maybeboard'); setSelectedIndex(idx) }}
+                onDoubleClick={openEdit}
+                onRemove={card => removeMutation.mutate({ oracleId: card.oracle_id, board: 'maybeboard' })}
+                onMove={card => moveMutation.mutate({ oracleId: card.oracle_id, fromBoard: 'maybeboard', toBoard: 'mainboard' })}
+                containerRef={maybeContainerRef}
+              />
             )}
           </div>
         )}
