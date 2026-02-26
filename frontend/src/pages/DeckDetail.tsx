@@ -212,6 +212,7 @@ export default function DeckDetail() {
 
   const mainContainerRef = useRef<HTMLDivElement | null>(null)
   const maybeContainerRef = useRef<HTMLDivElement | null>(null)
+  const addFocusRef = useRef<(() => void) | null>(null)
 
   const { data: deck, isLoading } = useQuery({
     queryKey: ['deck', deckId],
@@ -303,6 +304,15 @@ export default function DeckDetail() {
       }
 
       if (inInput) return
+
+      // 'a' focuses the add-card input
+      if (e.key.toLowerCase() === 'a' && !editModal && !addPicker && !commanderPicker) {
+        e.preventDefault()
+        setSelectedIndex(null)
+        setSelectedBoard(null)
+        addFocusRef.current?.()
+        return
+      }
 
       if (e.key === 'Enter' && selectedIndex !== null && selectedBoard && !editModal) {
         e.preventDefault()
@@ -490,8 +500,10 @@ export default function DeckDetail() {
       <div className="space-y-2">
         <div className="flex gap-2 items-center">
           <CardAutocomplete
-            placeholder="Add a card..."
+            placeholder="Add a card... (a)"
             onSelect={card => setAddPicker({ oracleId: card.oracle_id, cardName: card.name })}
+            focusRef={addFocusRef}
+            onFocus={() => { setSelectedIndex(null); setSelectedBoard(null) }}
             clearOnSelect
             className="flex-1"
           />

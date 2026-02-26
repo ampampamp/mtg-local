@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import type { Ownership } from '../types'
 import clsx from 'clsx'
@@ -13,6 +13,7 @@ let closeActive: (() => void) | null = null
 
 export default function OwnershipBadge({ ownership, needed = 1 }: Props) {
   const [showPopover, setShowPopover] = useState(false)
+  const containerRef = useRef<HTMLDivElement>(null)
 
   if (!ownership) return null
 
@@ -30,9 +31,28 @@ export default function OwnershipBadge({ ownership, needed = 1 }: Props) {
     { value: available, label: 'free', color: availColor },
   ]
 
+  // Close on click outside or Escape
+  useEffect(() => {
+    if (!showPopover) return
+    function onMouseDown(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setShowPopover(false)
+        closeActive = null
+      }
+    }
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') { setShowPopover(false); closeActive = null }
+    }
+    document.addEventListener('mousedown', onMouseDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [showPopover])
+
   function handleClick() {
     if (!showPopover) {
-      // Close whichever badge is currently open
       if (closeActive) closeActive()
       closeActive = () => setShowPopover(false)
     } else {
@@ -42,7 +62,7 @@ export default function OwnershipBadge({ ownership, needed = 1 }: Props) {
   }
 
   return (
-    <div className="relative inline-block">
+    <div ref={containerRef} className="relative inline-block">
       <button onClick={handleClick} className="text-left">
         <div className="flex gap-2">
           {stats.map(s => (
@@ -54,22 +74,28 @@ export default function OwnershipBadge({ ownership, needed = 1 }: Props) {
         </div>
       </button>
 
-      {showPopover && decks.length > 0 && (
+      {showPopover && (
         <div className="absolute z-50 bottom-full mb-1 left-0 bg-mtg-surface border border-gray-600
                         rounded shadow-xl p-2 min-w-48 text-xs">
-          <div className="font-semibold text-gray-300 mb-1">In decks:</div>
-          {decks.map(d => (
-            <div key={d.deck_id} className="flex justify-between gap-4">
-              <Link
-                to={`/decks/${d.deck_id}`}
-                className="text-blue-400 hover:text-blue-300 hover:underline truncate"
-                onClick={() => { setShowPopover(false); closeActive = null }}
-              >
-                {d.deck_name}
-              </Link>
-              <span className="text-gray-400 shrink-0">×{d.quantity}</span>
-            </div>
-          ))}
+          {decks.length > 0 ? (
+            <>
+              <div className="font-semibold text-gray-300 mb-1">In decks:</div>
+              {decks.map(d => (
+                <div key={d.deck_id} className="flex justify-between gap-4">
+                  <Link
+                    to={`/decks/${d.deck_id}`}
+                    className="text-blue-400 hover:text-blue-300 hover:underline truncate"
+                    onClick={() => { setShowPopover(false); closeActive = null }}
+                  >
+                    {d.deck_name}
+                  </Link>
+                  <span className="text-gray-400 shrink-0">×{d.quantity}</span>
+                </div>
+              ))}
+            </>
+          ) : (
+            <div className="text-gray-500">Not in any other decks</div>
+          )}
         </div>
       )}
     </div>
