@@ -9,9 +9,15 @@ interface Props {
   deckId: number
   onClose: () => void
   onFilterByTag: (tag: string) => void
+  existingTags?: string[]
+  recentTags?: string[]
+  onSaved?: (tags: string[]) => void
 }
 
-export default function EditDeckCardModal({ card, deckId, onClose, onFilterByTag }: Props) {
+export default function EditDeckCardModal({
+  card, deckId, onClose, onFilterByTag,
+  existingTags = [], recentTags = [], onSaved,
+}: Props) {
   const qc = useQueryClient()
   const [qty, setQty] = useState(card.quantity)
   const [tags, setTags] = useState<string[]>(card.tags ?? [])
@@ -33,6 +39,7 @@ export default function EditDeckCardModal({ card, deckId, onClose, onFilterByTag
         tags,
       })
       invalidate()
+      onSaved?.(tags)
       onClose()
     } finally {
       setSaving(false)
@@ -50,6 +57,8 @@ export default function EditDeckCardModal({ card, deckId, onClose, onFilterByTag
       setDeleting(false)
     }
   }
+
+  const suggestible = recentTags.filter(t => !tags.includes(t))
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
@@ -79,10 +88,25 @@ export default function EditDeckCardModal({ card, deckId, onClose, onFilterByTag
 
         <div className="space-y-1">
           <span className="text-xs text-gray-400">Tags <span className="text-gray-600">(click a tag to filter deck)</span></span>
+          {suggestible.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {suggestible.map(t => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setTags(prev => [...prev, t])}
+                  className="text-xs px-2 py-0.5 rounded-full bg-gray-700 text-gray-400 hover:bg-blue-900/50 hover:text-blue-300 transition-colors border border-dashed border-gray-600"
+                >
+                  + {t}
+                </button>
+              ))}
+            </div>
+          )}
           <TagInput
             tags={tags}
             onChange={setTags}
             onClickTag={tag => { onFilterByTag(tag); onClose() }}
+            existingTags={existingTags}
           />
         </div>
 

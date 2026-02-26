@@ -4,10 +4,18 @@ interface Props {
   tags: string[]
   onChange: (tags: string[]) => void
   onClickTag: (tag: string) => void
+  existingTags?: string[]
 }
 
-export default function TagInput({ tags, onChange, onClickTag }: Props) {
+export default function TagInput({ tags, onChange, onClickTag, existingTags = [] }: Props) {
   const [input, setInput] = useState('')
+
+  const suggestion = input.length > 0
+    ? (existingTags.find(t =>
+        t.toLowerCase().startsWith(input.toLowerCase()) && !tags.includes(t.toLowerCase())
+      ) ?? null)
+    : null
+  const ghostSuffix = suggestion ? suggestion.slice(input.length) : ''
 
   function commit() {
     if (!input.trim()) return
@@ -44,22 +52,40 @@ export default function TagInput({ tags, onChange, onClickTag }: Props) {
           ))}
         </div>
       )}
-      <input
-        type="text"
-        value={input}
-        onChange={e => setInput(e.target.value)}
-        onKeyDown={e => {
-          if (e.key === 'Enter' || e.key === ',') {
-            e.preventDefault()
-            commit()
-          } else if (e.key === 'Backspace' && !input && tags.length) {
-            onChange(tags.slice(0, -1))
-          }
-        }}
-        onBlur={commit}
-        placeholder={tags.length ? 'Add more...' : 'Add tags (Enter or , to confirm)...'}
-        className="input w-full text-xs"
-      />
+      <div className="relative">
+        {ghostSuffix && (
+          <div
+            className="absolute inset-0 flex items-center px-3 pointer-events-none overflow-hidden whitespace-pre text-xs"
+            aria-hidden
+          >
+            <span className="invisible">{input}</span>
+            <span className="text-gray-500">{ghostSuffix}</span>
+          </div>
+        )}
+        <input
+          type="text"
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === 'Tab' && suggestion) {
+              e.preventDefault()
+              const tag = suggestion.toLowerCase()
+              if (!tags.includes(tag)) onChange([...tags, tag])
+              setInput('')
+              return
+            }
+            if (e.key === 'Enter' || e.key === ',') {
+              e.preventDefault()
+              commit()
+            } else if (e.key === 'Backspace' && !input && tags.length) {
+              onChange(tags.slice(0, -1))
+            }
+          }}
+          onBlur={commit}
+          placeholder={tags.length ? 'Add more...' : 'Add tags (Enter or , to confirm)...'}
+          className="input w-full text-xs"
+        />
+      </div>
     </div>
   )
 }

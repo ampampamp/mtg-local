@@ -1,7 +1,7 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getDeck, removeDeckCard, importDecklist, getMissingCards, upsertDeckCard, moveCard, setCommander } from '../api'
+import { getDeck, removeDeckCard, importDecklist, getMissingCards, upsertDeckCard, moveCard, setCommander, renameDeck } from '../api'
 import type { DeckCard, ScryfallCard } from '../types'
 import OwnershipBadge from '../components/OwnershipBadge'
 import CardAutocomplete from '../components/CardAutocomplete'
@@ -209,6 +209,10 @@ export default function DeckDetail() {
   const [selectedBoard, setSelectedBoard] = useState<TargetBoard | null>(null)
   const [editModal, setEditModal] = useState<DeckCard | null>(null)
   const [tagFilter, setTagFilter] = useState<string | null>(null)
+  const [recentTags, setRecentTags] = useState<string[]>([])
+
+  const [editingName, setEditingName] = useState(false)
+  const [editingNameValue, setEditingNameValue] = useState('')
 
   const mainContainerRef = useRef<HTMLDivElement | null>(null)
   const maybeContainerRef = useRef<HTMLDivElement | null>(null)
@@ -226,6 +230,17 @@ export default function DeckDetail() {
   })
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['deck', deckId] })
+
+  const renameMutation = useMutation({
+    mutationFn: (name: string) => renameDeck(deckId, name),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['decks'] }); invalidate(); setEditingName(false) },
+  })
+
+  function startEditingName() { setEditingNameValue(deck?.name ?? ''); setEditingName(true) }
+  function commitRenameDeck() {
+    if (!editingNameValue.trim()) { setEditingName(false); return }
+    renameMutation.mutate(editingNameValue.trim())
+  }
 
   const removeMutation = useMutation({
     mutationFn: ({ oracleId, board }: { oracleId: string; board: string }) =>
@@ -269,6 +284,12 @@ export default function DeckDetail() {
   const maybeboard: DeckCard[] = deck
     ? deck.cards.filter((c: DeckCard) => c.board === 'maybeboard')
     : []
+
+  // All unique tags across all deck cards (for autocomplete)
+  const allDeckTags = useMemo(() => {
+    const all = [...mainboard, ...maybeboard]
+    return [...new Set(all.flatMap(c => c.tags ?? []))]
+  }, [deck])
 
   // Apply tag filter, then group for display
   const mainFiltered = tagFilter ? mainboard.filter(c => (c.tags ?? []).includes(tagFilter)) : mainboard
@@ -363,7 +384,30 @@ export default function DeckDetail() {
       <div className="flex items-start justify-between flex-wrap gap-2">
         <div>
           <Link to="/decks" className="text-xs text-gray-500 hover:text-gray-300">← All Decks</Link>
-          <h1 className="text-2xl font-bold mt-1">{deck.name}</h1>
+          {editingName ? (
+            <input
+              className="input text-2xl font-bold mt-1 py-0.5 px-2"
+              value={editingNameValue}
+              autoFocus
+              onChange={e => setEditingNameValue(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') commitRenameDeck()
+                if (e.key === 'Escape') setEditingName(false)
+              }}
+              onBlur={commitRenameDeck}
+            />
+          ) : (
+            <div className="flex items-center gap-2 group mt-1">
+              <h1 className="text-2xl font-bold">{deck.name}</h1>
+              <button
+                onClick={startEditingName}
+                className="text-gray-600 hover:text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity text-lg"
+                title="Rename deck"
+              >
+                ✎
+              </button>
+            </div>
+          )}
         </div>
         <div className="text-right text-sm space-y-0.5">
           <div className="text-gray-300">{deck.stats.total_cards} cards</div>
@@ -493,6 +537,12 @@ export default function DeckDetail() {
           deckId={deckId}
           onClose={() => setEditModal(null)}
           onFilterByTag={tag => { setEditModal(null); setTagFilter(tag) }}
+          existingTags={allDeckTags}
+          recentTags={recentTags}
+          onSaved={savedTags => setRecentTags(prev => {
+            const merged = [...savedTags, ...prev.filter(t => !savedTags.includes(t))]
+            return merged.slice(0, 2)
+          })}
         />
       )}
 

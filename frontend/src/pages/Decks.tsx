@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, Link } from 'react-router-dom'
-import { getDecks, createDeck, deleteDeck } from '../api'
+import { getDecks, createDeck, deleteDeck, renameDeck } from '../api'
 import type { Deck, ScryfallCard } from '../types'
 import CardAutocomplete from '../components/CardAutocomplete'
 import PrintingPickerModal from '../components/PrintingPickerModal'
@@ -16,6 +16,8 @@ export default function DecksPage() {
   const navigate = useNavigate()
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [editingName, setEditingName] = useState('')
   const [commanderCard, setCommanderCard] = useState<ScryfallCard | null>(null)
   const [commanderPicker, setCommanderPicker] = useState<{ oracleId: string; cardName: string } | null>(null)
   const [importText, setImportText] = useState('')
@@ -50,6 +52,24 @@ export default function DecksPage() {
     mutationFn: (id: number) => deleteDeck(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['decks'] }),
   })
+
+  const renameMutation = useMutation({
+    mutationFn: ({ id, name }: { id: number; name: string }) => renameDeck(id, name),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['decks'] })
+      setEditingId(null)
+    },
+  })
+
+  function startEditing(deck: Deck) {
+    setEditingId(deck.id)
+    setEditingName(deck.name)
+  }
+
+  function commitRename() {
+    if (!editingId || !editingName.trim()) { setEditingId(null); return }
+    renameMutation.mutate({ id: editingId, name: editingName.trim() })
+  }
 
   const decks: Deck[] = data?.data ?? []
 
@@ -214,10 +234,34 @@ export default function DecksPage() {
             onDoubleClick={() => navigate(`/decks/${deck.id}`)}
             className="bg-mtg-surface rounded-xl p-4 flex items-center justify-between border border-gray-700/50 hover:border-gray-600 transition-colors cursor-pointer"
           >
-            <div>
-              <Link to={`/decks/${deck.id}`} className="font-semibold hover:text-mtg-accent transition-colors">
-                {deck.name}
-              </Link>
+            <div className="min-w-0 flex-1">
+              {editingId === deck.id ? (
+                <input
+                  className="input text-sm font-semibold py-0.5 px-2 w-full max-w-xs"
+                  value={editingName}
+                  autoFocus
+                  onChange={e => setEditingName(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') commitRename()
+                    if (e.key === 'Escape') setEditingId(null)
+                  }}
+                  onBlur={commitRename}
+                  onClick={e => e.stopPropagation()}
+                />
+              ) : (
+                <div className="flex items-center gap-1.5 group">
+                  <Link to={`/decks/${deck.id}`} className="font-semibold hover:text-mtg-accent transition-colors">
+                    {deck.name}
+                  </Link>
+                  <button
+                    onClick={e => { e.stopPropagation(); startEditing(deck) }}
+                    className="text-gray-600 hover:text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity text-sm"
+                    title="Rename deck"
+                  >
+                    ✎
+                  </button>
+                </div>
+              )}
               {deck.description && (
                 <div className="text-xs text-gray-400 mt-0.5">{deck.description}</div>
               )}

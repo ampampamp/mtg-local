@@ -50,6 +50,9 @@ export const updateDeck = (id: number, data: { name: string; format: string; des
 export const deleteDeck = (id: number) =>
   api.delete(`/decks/${id}`).then(r => r.data)
 
+export const renameDeck = (id: number, name: string) =>
+  api.patch(`/decks/${id}`, { name }).then(r => r.data)
+
 export const upsertDeckCard = (deckId: number, data: {
   name: string
   oracle_id?: string

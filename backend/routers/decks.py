@@ -265,6 +265,21 @@ async def update_deck(deck_id: int, body: CreateDeck, db: AsyncSession = Depends
     return {"status": "updated"}
 
 
+class PatchDeck(BaseModel):
+    name: str
+
+
+@router.patch("/{deck_id}")
+async def patch_deck(deck_id: int, body: PatchDeck, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Deck).where(Deck.id == deck_id))
+    deck = result.scalar_one_or_none()
+    if not deck:
+        raise HTTPException(status_code=404, detail="Deck not found")
+    deck.name = body.name
+    await db.commit()
+    return {"status": "updated"}
+
+
 @router.delete("/{deck_id}")
 async def delete_deck(deck_id: int, db: AsyncSession = Depends(get_db)):
     await db.execute(delete(DeckCard).where(DeckCard.deck_id == deck_id))

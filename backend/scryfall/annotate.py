@@ -52,7 +52,7 @@ async def _get_usage_map(oracle_ids: list[str], db: AsyncSession) -> dict:
         select(DeckCard, Deck.name)
         .join(Deck, DeckCard.deck_id == Deck.id)
         .where(DeckCard.oracle_id.in_(oracle_ids))
-        .where(DeckCard.board == "mainboard")
+        .where(DeckCard.board.in_(["mainboard", "commander"]))
     )
     rows = result.all()
     usage = defaultdict(list)
