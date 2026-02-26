@@ -41,5 +41,6 @@ class DeckCard(Base):
     name: Mapped[str] = mapped_column(String)
     quantity: Mapped[int] = mapped_column(Integer, default=1)
     board: Mapped[str] = mapped_column(String, default="mainboard")  # mainboard/sideboard/maybeboard
+    tags: Mapped[str] = mapped_column(String, default="")  # comma-separated tag list
 
     deck: Mapped["Deck"] = relationship("Deck", back_populates="cards")

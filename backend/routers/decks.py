@@ -32,6 +32,7 @@ class UpsertDeckCard(BaseModel):
     name: str
     quantity: int = 1
     board: str = "mainboard"
+    tags: list[str] = []
 
 
 class MoveCard(BaseModel):
@@ -49,7 +50,7 @@ class ImportDecklist(BaseModel):
 async def list_decks(db: AsyncSession = Depends(get_db)):
     count_sub = (
         select(DeckCard.deck_id, func.sum(DeckCard.quantity).label("card_count"))
-        .where(DeckCard.board == "mainboard")
+        .where(DeckCard.board.in_(["mainboard", "commander"]))
         .group_by(DeckCard.deck_id)
         .subquery()
     )
@@ -172,6 +173,8 @@ async def set_commander(deck_id: int, body: UpsertDeckCard, db: AsyncSession = D
         raise HTTPException(status_code=404, detail="Card not found")
 
     await db.execute(delete(DeckCard).where(DeckCard.deck_id == deck_id, DeckCard.board == "commander"))
+    # Also remove from mainboard/maybeboard so the commander isn't double-counted
+    await db.execute(delete(DeckCard).where(DeckCard.deck_id == deck_id, DeckCard.oracle_id == oracle_id, DeckCard.board != "commander"))
     db.add(DeckCard(
         deck_id=deck_id,
         oracle_id=oracle_id,
@@ -206,6 +209,7 @@ async def get_deck(deck_id: int, db: AsyncSession = Depends(get_db)):
             "name": dc.name,
             "quantity": dc.quantity,
             "board": dc.board,
+            "tags": [t.strip() for t in (dc.tags or "").split(",") if t.strip()],
             "image_uri": card_store.get_image_uri(card_data) if card_data else None,
             "mana_cost": card_data.get("mana_cost", ""),
             "type_line": card_data.get("type_line", ""),
@@ -220,11 +224,12 @@ async def get_deck(deck_id: int, db: AsyncSession = Depends(get_db)):
     for mini, full in zip(annotated_mini, cards_out):
         full["_ownership"] = mini.get("_ownership", {})
 
-    mainboard = [c for c in cards_out if c["board"] == "mainboard"]
+    commander_oracle_ids = {c["oracle_id"] for c in cards_out if c["board"] == "commander"}
+    mainboard = [c for c in cards_out if c["board"] == "mainboard" and c["oracle_id"] not in commander_oracle_ids]
     sideboard = [c for c in cards_out if c["board"] == "sideboard"]
     missing = [
         c for c in mainboard
-        if c.get("_ownership", {}).get("available", 0) < c["quantity"]
+        if c.get("_ownership", {}).get("owned", 0) < c["quantity"]
     ]
 
     return {
@@ -236,7 +241,7 @@ async def get_deck(deck_id: int, db: AsyncSession = Depends(get_db)):
         "updated_at": deck.updated_at,
         "cards": cards_out,
         "stats": {
-            "total_cards": sum(c["quantity"] for c in mainboard),
+            "total_cards": sum(c["quantity"] for c in mainboard) + len(commander_oracle_ids),
             "sideboard_cards": sum(c["quantity"] for c in sideboard),
             "missing_cards": len(missing),
             "total_price": sum(
@@ -301,9 +306,12 @@ async def upsert_deck_card(deck_id: int, body: UpsertDeckCard, db: AsyncSession 
     )
     existing = result.scalar_one_or_none()
 
+    tags_str = ",".join(t.strip().lower() for t in body.tags if t.strip())
+
     if existing:
         existing.quantity = body.quantity
         existing.scryfall_id = scryfall_id or existing.scryfall_id
+        existing.tags = tags_str
     else:
         db.add(DeckCard(
             deck_id=deck_id,
@@ -312,6 +320,7 @@ async def upsert_deck_card(deck_id: int, body: UpsertDeckCard, db: AsyncSession 
             name=body.name,
             quantity=body.quantity,
             board=body.board,
+            tags=tags_str,
         ))
 
     await db.commit()
@@ -350,6 +359,10 @@ async def move_card(deck_id: int, body: MoveCard, db: AsyncSession = Depends(get
 
     if dst:
         dst.quantity += src.quantity
+        if src.tags:
+            existing_tags = set(dst.tags.split(",")) if dst.tags else set()
+            merged = existing_tags | set(src.tags.split(","))
+            dst.tags = ",".join(t for t in merged if t)
     else:
         db.add(DeckCard(
             deck_id=deck_id,
@@ -358,6 +371,7 @@ async def move_card(deck_id: int, body: MoveCard, db: AsyncSession = Depends(get
             name=src.name,
             quantity=src.quantity,
             board=body.to_board,
+            tags=src.tags,
         ))
 
     await db.delete(src)
@@ -387,12 +401,12 @@ async def get_missing_cards(deck_id: int, db: AsyncSession = Depends(get_db)):
         if card["board"] != "mainboard":
             continue
         ownership = card.get("_ownership", {})
-        available = ownership.get("available", 0)
+        owned = ownership.get("owned", 0)
         needed = card["quantity"]
-        if available < needed:
+        if owned < needed:
             missing.append({
                 **card,
-                "need_to_acquire": needed - available,
+                "need_to_acquire": needed - owned,
             })
     return {"data": missing, "total": len(missing)}
 
@@ -403,6 +417,12 @@ async def import_decklist(deck_id: int, body: ImportDecklist, db: AsyncSession =
     deck = result.scalar_one_or_none()
     if not deck:
         raise HTTPException(status_code=404, detail="Deck not found")
+
+    # Get existing commander oracle_id to exclude it from mainboard imports
+    cmd_result = await db.execute(
+        select(DeckCard.oracle_id).where(DeckCard.deck_id == deck_id, DeckCard.board == "commander")
+    )
+    commander_oracle_id = cmd_result.scalar_one_or_none()
 
     imported, failed = [], []
     lines = [l.strip() for l in body.text.strip().splitlines() if l.strip()]
@@ -444,6 +464,10 @@ async def import_decklist(deck_id: int, body: ImportDecklist, db: AsyncSession =
 
         if not oracle_id:
             failed.append({"line": line, "reason": f"Card '{name}' not found"})
+            continue
+
+        # Skip commander card — it lives in its own board
+        if commander_oracle_id and oracle_id == commander_oracle_id:
             continue
 
         result2 = await db.execute(

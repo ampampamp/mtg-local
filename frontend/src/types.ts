@@ -66,6 +66,7 @@ export interface DeckCard {
   name: string
   quantity: number
   board: string
+  tags?: string[]
   image_uri?: string
   mana_cost?: string
   type_line?: string

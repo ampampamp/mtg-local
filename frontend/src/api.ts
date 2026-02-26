@@ -56,6 +56,7 @@ export const upsertDeckCard = (deckId: number, data: {
   scryfall_id?: string
   quantity: number
   board: string
+  tags?: string[]
 }) => api.post(`/decks/${deckId}/cards`, data).then(r => r.data)
 
 export const removeDeckCard = (deckId: number, oracleId: string, board = 'mainboard') =>
