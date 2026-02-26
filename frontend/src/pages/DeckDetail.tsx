@@ -82,6 +82,227 @@ function annotateGroups(groups: CardGroup[]): AnnotatedGroup[] {
   }))
 }
 
+// ── Mana pie charts ───────────────────────────────────────────────────────────
+const MANA_COLORS = ['W', 'U', 'B', 'R', 'G', 'C'] as const
+type ManaColor = typeof MANA_COLORS[number]
+
+const MANA_COLOR_STYLE: Record<ManaColor, { bg: string; label: string }> = {
+  W: { bg: '#f5e8a3', label: 'White' },
+  U: { bg: '#4a90d9', label: 'Blue'  },
+  B: { bg: '#7c6f8e', label: 'Black' },
+  R: { bg: '#e94560', label: 'Red'   },
+  G: { bg: '#3a9e5f', label: 'Green' },
+  C: { bg: '#9ca3af', label: 'Colorless' },
+}
+
+/** Extract colored/colorless mana symbols from a mana cost string (handles " // " MDFCs). */
+function extractManaSymbols(manaCost: string | undefined): Partial<Record<ManaColor, number>> {
+  const counts: Partial<Record<ManaColor, number>> = {}
+  if (!manaCost) return counts
+  for (const part of manaCost.split(' // ')) {
+    for (const match of part.matchAll(/\{([^}]+)\}/g)) {
+      const inner = match[1]
+      for (const sym of MANA_COLORS) {
+        // exact match OR present in a hybrid symbol like W/U or 2/W or W/P
+        if (inner === sym || inner.split('/').includes(sym)) {
+          counts[sym] = (counts[sym] ?? 0) + 1
+        }
+      }
+    }
+  }
+  return counts
+}
+
+/** Parse oracle text to determine which mana colors a land can produce. */
+function parseLandProduction(oracleText: string | undefined): ManaColor[] {
+  if (!oracleText) return []
+  // "any color" → all five colors
+  if (/any color/i.test(oracleText)) return ['W', 'U', 'B', 'R', 'G']
+  const produced = new Set<ManaColor>()
+  // Find sentences/lines containing "Add" and extract color symbols from them
+  for (const sentence of oracleText.split(/\n|(?<=\.)\s+/)) {
+    if (!/\bAdd\b/i.test(sentence)) continue
+    for (const match of sentence.matchAll(/\{([WUBRGC])\}/g)) {
+      produced.add(match[1] as ManaColor)
+    }
+  }
+  return [...produced]
+}
+
+/** SVG pie chart. Each slice is {color, count}. */
+function PieChart({ slices, size = 80 }: {
+  slices: { color: ManaColor; count: number }[]
+  size?: number
+}) {
+  const total = slices.reduce((s, sl) => s + sl.count, 0)
+  if (total === 0) return <div style={{ width: size, height: size }} className="rounded-full bg-gray-700/40" />
+
+  const r = size / 2
+  const paths: { d: string; fill: string; title: string }[] = []
+  let angle = -Math.PI / 2 // start at 12 o'clock
+
+  for (const sl of slices) {
+    if (sl.count === 0) continue
+    const sweep = (sl.count / total) * 2 * Math.PI
+    const x1 = r + r * Math.cos(angle)
+    const y1 = r + r * Math.sin(angle)
+    angle += sweep
+    const x2 = r + r * Math.cos(angle)
+    const y2 = r + r * Math.sin(angle)
+    const large = sweep > Math.PI ? 1 : 0
+    paths.push({
+      d: `M${r},${r} L${x1},${y1} A${r},${r} 0 ${large} 1 ${x2},${y2} Z`,
+      fill: MANA_COLOR_STYLE[sl.color].bg,
+      title: `${MANA_COLOR_STYLE[sl.color].label}: ${sl.count}`,
+    })
+  }
+
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+      {paths.map((p, i) => (
+        <path key={i} d={p.d} fill={p.fill} opacity={0.85}>
+          <title>{p.title}</title>
+        </path>
+      ))}
+    </svg>
+  )
+}
+
+function ManaSymbolPie({ cards, commander }: { cards: DeckCard[]; commander?: DeckCard }) {
+  const all = commander ? [...cards, commander] : cards
+  const spells = all.filter(c => !c.type_line?.toLowerCase().includes('land'))
+
+  const totals: Partial<Record<ManaColor, number>> = {}
+  for (const card of spells) {
+    const syms = extractManaSymbols(card.mana_cost)
+    for (const [sym, n] of Object.entries(syms) as [ManaColor, number][]) {
+      totals[sym] = (totals[sym] ?? 0) + n * card.quantity
+    }
+  }
+
+  const total = Object.values(totals).reduce((s, n) => s + n, 0)
+  const slices = MANA_COLORS.filter(c => totals[c]).map(c => ({ color: c, count: totals[c]! }))
+
+  return (
+    <div className="flex flex-col items-center gap-2">
+      <div className="text-xs text-gray-500">Mana Symbols <span className="text-gray-600">({total})</span></div>
+      <PieChart slices={slices} />
+      <div className="flex flex-wrap justify-center gap-x-2 gap-y-0.5">
+        {slices.map(sl => (
+          <span key={sl.color} className="flex items-center gap-1 text-[10px] text-gray-400">
+            <span className="w-2 h-2 rounded-sm inline-block" style={{ background: MANA_COLOR_STYLE[sl.color].bg, opacity: 0.85 }} />
+            {sl.count}{sl.color}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function LandProductionPie({ cards }: { cards: DeckCard[] }) {
+  const lands = cards.filter(c => c.type_line?.toLowerCase().includes('land'))
+
+  const totals: Partial<Record<ManaColor, number>> = {}
+  for (const land of lands) {
+    const produced = parseLandProduction(land.oracle_text)
+    for (const color of produced) {
+      totals[color] = (totals[color] ?? 0) + land.quantity
+    }
+  }
+
+  const landCount = lands.reduce((s, c) => s + c.quantity, 0)
+  const slices = MANA_COLORS.filter(c => totals[c]).map(c => ({ color: c, count: totals[c]! }))
+
+  return (
+    <div className="flex flex-col items-center gap-2">
+      <div className="text-xs text-gray-500">Land Production <span className="text-gray-600">({landCount} lands)</span></div>
+      <PieChart slices={slices} />
+      <div className="flex flex-wrap justify-center gap-x-2 gap-y-0.5">
+        {slices.map(sl => (
+          <span key={sl.color} className="flex items-center gap-1 text-[10px] text-gray-400">
+            <span className="w-2 h-2 rounded-sm inline-block" style={{ background: MANA_COLOR_STYLE[sl.color].bg, opacity: 0.85 }} />
+            {sl.count}{sl.color}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ── Mana curve histogram ──────────────────────────────────────────────────────
+const CMC_LABELS = ['0', '1', '2', '3', '4', '5', '6', '7+']
+
+function ManaCurve({ cards, commander }: { cards: DeckCard[]; commander?: DeckCard }) {
+  const all = commander ? [...cards, commander] : cards
+  const spells = all.filter(c => !c.type_line?.toLowerCase().includes('land'))
+
+  const isNonPermanent = (c: DeckCard) =>
+    c.type_line?.includes('Instant') || c.type_line?.includes('Sorcery')
+
+  const permCounts = Object.fromEntries(CMC_LABELS.map(l => [l, 0]))
+  const nonPermCounts = Object.fromEntries(CMC_LABELS.map(l => [l, 0]))
+
+  for (const card of spells) {
+    const cmc = Math.floor(card.cmc ?? 0)
+    const key = cmc >= 7 ? '7+' : String(cmc)
+    if (isNonPermanent(card)) nonPermCounts[key] += card.quantity
+    else permCounts[key] += card.quantity
+  }
+
+  const totals = CMC_LABELS.map(l => permCounts[l] + nonPermCounts[l])
+  const maxCount = Math.max(...totals, 1)
+  const total = totals.reduce((s, c) => s + c, 0)
+  const avgCmc = total === 0 ? 0 : spells.reduce((s, c) => s + (c.cmc ?? 0) * c.quantity, 0) / total
+
+  return (
+    <div className="flex flex-col flex-1 min-w-0">
+      <div className="flex items-center gap-3 mb-2">
+        <span className="text-xs text-gray-500">
+          Mana Curve <span className="text-gray-600">({total} spells · avg {avgCmc.toFixed(2)})</span>
+        </span>
+        <div className="flex items-center gap-2 ml-auto">
+          <span className="flex items-center gap-1">
+            <span className="w-2 h-2 rounded-sm inline-block bg-mtg-accent opacity-85" />
+            <span className="text-[10px] text-gray-600">Permanent</span>
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="w-2 h-2 rounded-sm inline-block bg-mtg-gold opacity-85" />
+            <span className="text-[10px] text-gray-600">Non-permanent</span>
+          </span>
+        </div>
+      </div>
+      <div className="h-20 flex items-stretch gap-1">
+        {CMC_LABELS.map((label, i) => {
+          const perm = permCounts[label]
+          const nonPerm = nonPermCounts[label]
+          const total = totals[i]
+          const pct = (total / maxCount) * 100
+          return (
+            <div key={label} className="flex flex-col items-center justify-end flex-1 min-w-0">
+              {total > 0 && (
+                <div className="text-[10px] text-gray-400 mb-0.5 leading-none">{total}</div>
+              )}
+              <div
+                className="w-full flex flex-col overflow-hidden rounded-t-sm"
+                style={{ height: total === 0 ? '1px' : `${Math.max(pct, 5)}%`, opacity: total === 0 ? 0.15 : 0.85 }}
+                title={`CMC ${label}: ${perm} permanent${perm !== 1 ? 's' : ''}, ${nonPerm} non-permanent${nonPerm !== 1 ? 's' : ''}`}
+              >
+                {nonPerm > 0 && <div style={{ flex: nonPerm }} className="bg-mtg-gold" />}
+                {perm > 0 && <div style={{ flex: perm }} className="bg-mtg-accent" />}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      <div className="flex gap-1 mt-1">
+        {CMC_LABELS.map(label => (
+          <div key={label} className="flex-1 text-center text-[10px] text-gray-600">{label}</div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // ── Card image tile ───────────────────────────────────────────────────────────
 function DeckCardTile({
   card, board, navIndex, selected, onRemove, onMove, onClick, onDoubleClick,
@@ -491,7 +712,7 @@ export default function DeckDetail() {
                 <OwnershipBadge ownership={commander._ownership} needed={1} />
               </div>
             </div>
-            <div className="space-y-1 min-w-0">
+            <div className="space-y-1 min-w-0 shrink-0">
               <div className="text-lg font-bold">{commander.name}</div>
               {commander.type_line && <div className="text-sm text-gray-400">{commander.type_line}</div>}
               {commander.mana_cost && <div><ManaCost cost={commander.mana_cost} /></div>}
@@ -507,6 +728,13 @@ export default function DeckDetail() {
               ) : (
                 <button onClick={() => setChangingCommander(true)} className="btn-secondary text-xs mt-2">Change</button>
               )}
+            </div>
+            <div className="flex flex-col flex-1 min-w-0 gap-4">
+              <ManaCurve cards={mainboard} commander={commander} />
+              <div className="flex gap-6 justify-around">
+                <ManaSymbolPie cards={mainboard} commander={commander} />
+                <LandProductionPie cards={mainboard} />
+              </div>
             </div>
           </div>
         ) : (

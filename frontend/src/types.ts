@@ -69,6 +69,7 @@ export interface DeckCard {
   tags?: string[]
   image_uri?: string
   mana_cost?: string
+  oracle_text?: string
   type_line?: string
   cmc?: number
   colors?: string[]
