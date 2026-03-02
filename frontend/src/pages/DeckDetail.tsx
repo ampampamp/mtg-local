@@ -8,6 +8,7 @@ import CardAutocomplete from '../components/CardAutocomplete'
 import PrintingPickerModal from '../components/PrintingPickerModal'
 import ManaCost from '../components/ManaCost'
 import EditDeckCardModal from '../components/EditDeckCardModal'
+import FlippableCardImage from '../components/FlippableCardImage'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type TargetBoard = 'mainboard' | 'maybeboard'
@@ -326,13 +327,11 @@ function DeckCardTile({
       onDoubleClick={onDoubleClick}
     >
       <div className="relative group">
-        {card.image_uri ? (
-          <img src={card.image_uri} alt={card.name} className="w-full rounded-lg" loading="lazy" />
-        ) : (
-          <div className="aspect-[2.5/3.5] bg-mtg-card rounded-lg flex items-center justify-center text-xs text-gray-500 px-2 text-center">
-            {card.name}
-          </div>
-        )}
+        <FlippableCardImage
+          front={card.image_uri}
+          back={card.image_uri_back}
+          alt={card.name}
+        />
         {card.quantity > 1 && (
           <div className="absolute top-1 left-1 bg-black/80 text-white text-xs font-bold px-1.5 py-0.5 rounded">
             ×{card.quantity}

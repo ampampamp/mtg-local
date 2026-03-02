@@ -63,6 +63,7 @@ async def list_collection(db: AsyncSession = Depends(get_db)):
             "foil_quantity": row.foil_quantity,
             "condition": row.condition,
             "image_uri": card_store.get_image_uri(card_data) if card_data else None,
+            "image_uri_back": card_store.get_image_uri(card_data, face="back") if card_data else None,
             "prices": card_data.get("prices") or {},
             "set_name": card_data.get("set_name", ""),
             # Only the two URI fields the frontend actually uses

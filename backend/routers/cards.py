@@ -60,6 +60,7 @@ async def autocomplete(
             "set_name": c.get("set_name"),
             "collector_number": c.get("collector_number"),
             "image_uri": card_store.get_image_uri(c),
+            "image_uri_back": card_store.get_image_uri(c, face="back"),
             "prices": c.get("prices", {}),
             "_ownership": c.get("_ownership"),
         }

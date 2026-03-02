@@ -211,6 +211,7 @@ async def get_deck(deck_id: int, db: AsyncSession = Depends(get_db)):
             "board": dc.board,
             "tags": [t.strip() for t in (dc.tags or "").split(",") if t.strip()],
             "image_uri": card_store.get_image_uri(card_data) if card_data else None,
+            "image_uri_back": card_store.get_image_uri(card_data, face="back") if card_data else None,
             "mana_cost": card_data.get("mana_cost", ""),
             "oracle_text": card_data.get("oracle_text", ""),
             "type_line": card_data.get("type_line", ""),

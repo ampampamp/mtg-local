@@ -57,12 +57,17 @@ class CardStore:
 
     def get_image_uri(self, card: dict, face: str = "front") -> Optional[str]:
         """Extract image URI handling DFCs."""
+        if face == "back":
+            # Only DFCs have a back face; single-faced cards return None
+            faces = card.get("card_faces", [])
+            if len(faces) >= 2:
+                return faces[1].get("image_uris", {}).get("normal")
+            return None
         if "image_uris" in card:
             return card["image_uris"].get("normal")
         faces = card.get("card_faces", [])
         if faces:
-            idx = 1 if face == "back" and len(faces) > 1 else 0
-            return faces[idx].get("image_uris", {}).get("normal")
+            return faces[0].get("image_uris", {}).get("normal")
         return None
 
 

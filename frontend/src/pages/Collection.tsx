@@ -5,6 +5,7 @@ import type { CollectionEntry, ScryfallCard } from '../types'
 import CardAutocomplete from '../components/CardAutocomplete'
 import AddToCollectionModal from '../components/AddToCollectionModal'
 import PrintingPickerModal from '../components/PrintingPickerModal'
+import FlippableCardImage from '../components/FlippableCardImage'
 
 const PAGE_SIZE = 60
 
@@ -46,13 +47,12 @@ function CollectionTile({ card, index, selected, onClick, onDoubleClick }: TileP
       onClick={onClick}
       onDoubleClick={onDoubleClick}
     >
-      {card.image_uri ? (
-        <img src={card.image_uri} alt={card.name} className="w-full" loading="lazy" />
-      ) : (
-        <div className="aspect-[2.5/3.5] bg-mtg-surface flex items-center justify-center text-gray-600 text-xs px-2 text-center">
-          {card.name}
-        </div>
-      )}
+      <FlippableCardImage
+        front={card.image_uri}
+        back={card.image_uri_back}
+        alt={card.name}
+        className="w-full"
+      />
       <div className="p-2 text-xs">
         <div className="flex items-center justify-between gap-1">
           <span className="font-medium flex items-center gap-1.5">

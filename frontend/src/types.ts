@@ -41,6 +41,7 @@ export interface CollectionEntry {
   foil_quantity: number
   condition: string
   image_uri?: string
+  image_uri_back?: string
   prices?: { usd?: string; usd_foil?: string }
   set_name: string
   scryfall_uri?: string
@@ -68,6 +69,7 @@ export interface DeckCard {
   board: string
   tags?: string[]
   image_uri?: string
+  image_uri_back?: string
   mana_cost?: string
   oracle_text?: string
   type_line?: string
