@@ -869,7 +869,7 @@ export default function DeckDetail() {
                         <span className="text-xs text-gray-600">{mainCount}</span>
                       </div>
                     )}
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(90px, 1fr))', gap: '8px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '8px' }}>
                       {mainSection?.cards.map(({ card, seqIdx }) => (
                         <DeckCardTile
                           key={`main-${label}-${card.id}`}
@@ -899,10 +899,11 @@ export default function DeckDetail() {
                   {/* Maybeboard column — slides in from right */}
                   <div
                     style={{
-                      width: showMaybe ? '32%' : '0',
+                      width: showMaybe ? '25%' : '0',
                       flexShrink: 0,
                       overflow: 'hidden',
-                      transition: 'width 0.3s ease',
+                      paddingLeft: showMaybe ? '6px' : '0',
+                      transition: 'width 0.3s ease, padding-left 0.3s ease',
                     }}
                   >
                     {showLabel && maybeCount > 0 && (
@@ -911,7 +912,7 @@ export default function DeckDetail() {
                         <span className="text-xs text-gray-700">{maybeCount}</span>
                       </div>
                     )}
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(90px, 1fr))', gap: '8px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '8px' }}>
                       {maybeSection?.cards.map(({ card, seqIdx }) => (
                         <DeckCardTile
                           key={`maybe-${label}-${card.id}`}
