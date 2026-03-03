@@ -136,101 +136,100 @@ function parseLandProduction(oracleText: string | undefined): ManaColor[] {
   return [...produced]
 }
 
-/** SVG pie chart. Each slice is {color, count}. */
-function PieChart({ slices, size = 80 }: {
-  slices: { color: ManaColor; count: number }[]
-  size?: number
-}) {
-  const total = slices.reduce((s, sl) => s + sl.count, 0)
-  if (total === 0) return <div style={{ width: size, height: size }} className="rounded-full bg-gray-700/40" />
+/** Grouped bar chart: mana symbols demanded vs land production per color. */
+function ManaColorChart({ cards, commander }: { cards: DeckCard[]; commander?: DeckCard }) {
+  const [hovered, setHovered] = useState<ManaColor | null>(null)
 
-  const r = size / 2
-  const paths: { d: string; fill: string; title: string }[] = []
-  let angle = -Math.PI / 2 // start at 12 o'clock
-
-  for (const sl of slices) {
-    if (sl.count === 0) continue
-    const sweep = (sl.count / total) * 2 * Math.PI
-    const x1 = r + r * Math.cos(angle)
-    const y1 = r + r * Math.sin(angle)
-    angle += sweep
-    const x2 = r + r * Math.cos(angle)
-    const y2 = r + r * Math.sin(angle)
-    const large = sweep > Math.PI ? 1 : 0
-    paths.push({
-      d: `M${r},${r} L${x1},${y1} A${r},${r} 0 ${large} 1 ${x2},${y2} Z`,
-      fill: MANA_COLOR_STYLE[sl.color].bg,
-      title: `${MANA_COLOR_STYLE[sl.color].label}: ${sl.count}`,
-    })
-  }
-
-  return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-      {paths.map((p, i) => (
-        <path key={i} d={p.d} fill={p.fill} opacity={0.85}>
-          <title>{p.title}</title>
-        </path>
-      ))}
-    </svg>
-  )
-}
-
-function ManaSymbolPie({ cards, commander }: { cards: DeckCard[]; commander?: DeckCard }) {
   const all = commander ? [...cards, commander] : cards
   const spells = all.filter(c => !c.type_line?.toLowerCase().includes('land'))
 
-  const totals: Partial<Record<ManaColor, number>> = {}
+  const symTotals: Partial<Record<ManaColor, number>> = {}
   for (const card of spells) {
     const syms = extractManaSymbols(card.mana_cost)
     for (const [sym, n] of Object.entries(syms) as [ManaColor, number][]) {
-      totals[sym] = (totals[sym] ?? 0) + n * card.quantity
+      symTotals[sym] = (symTotals[sym] ?? 0) + n * card.quantity
     }
   }
 
-  const total = Object.values(totals).reduce((s, n) => s + n, 0)
-  const slices = MANA_COLORS.filter(c => totals[c]).map(c => ({ color: c, count: totals[c]! }))
-
-  return (
-    <div className="flex flex-col items-center gap-2">
-      <div className="text-xs text-gray-500">Mana Symbols <span className="text-gray-600">({total})</span></div>
-      <PieChart slices={slices} />
-      <div className="flex flex-wrap justify-center gap-x-2 gap-y-0.5">
-        {slices.map(sl => (
-          <span key={sl.color} className="flex items-center gap-1 text-[10px] text-gray-400">
-            <span className="w-2 h-2 rounded-sm inline-block" style={{ background: MANA_COLOR_STYLE[sl.color].bg, opacity: 0.85 }} />
-            {sl.count}{sl.color}
-          </span>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function LandProductionPie({ cards }: { cards: DeckCard[] }) {
   const lands = cards.filter(c => c.type_line?.toLowerCase().includes('land'))
-
-  const totals: Partial<Record<ManaColor, number>> = {}
+  const landTotals: Partial<Record<ManaColor, number>> = {}
   for (const land of lands) {
-    const produced = parseLandProduction(land.oracle_text)
-    for (const color of produced) {
-      totals[color] = (totals[color] ?? 0) + land.quantity
+    for (const color of parseLandProduction(land.oracle_text)) {
+      landTotals[color] = (landTotals[color] ?? 0) + land.quantity
     }
   }
 
-  const landCount = lands.reduce((s, c) => s + c.quantity, 0)
-  const slices = MANA_COLORS.filter(c => totals[c]).map(c => ({ color: c, count: totals[c]! }))
+  const maxVal = Math.max(...MANA_COLORS.map(c => Math.max(symTotals[c] ?? 0, landTotals[c] ?? 0)), 1)
+  const yMax = Math.max(Math.ceil(maxVal / 5) * 5, 5)
+  const ticks = Array.from({ length: yMax / 5 + 1 }, (_, i) => i * 5)
 
   return (
-    <div className="flex flex-col items-center gap-2">
-      <div className="text-xs text-gray-500">Land Production <span className="text-gray-600">({landCount} lands)</span></div>
-      <PieChart slices={slices} />
-      <div className="flex flex-wrap justify-center gap-x-2 gap-y-0.5">
-        {slices.map(sl => (
-          <span key={sl.color} className="flex items-center gap-1 text-[10px] text-gray-400">
-            <span className="w-2 h-2 rounded-sm inline-block" style={{ background: MANA_COLOR_STYLE[sl.color].bg, opacity: 0.85 }} />
-            {sl.count}{sl.color}
-          </span>
-        ))}
+    <div className="space-y-1">
+      <div className="text-xs text-gray-500">Mana Balance</div>
+      <div className="flex gap-1.5">
+        {/* Y-axis labels */}
+        <div className="relative flex-shrink-0 w-4" style={{ height: 64 }}>
+          {ticks.map(v => (
+            <div
+              key={v}
+              className="absolute right-0 text-[9px] text-gray-600 leading-none"
+              style={{ bottom: `${(v / yMax) * 100}%`, transform: 'translateY(50%)' }}
+            >
+              {v}
+            </div>
+          ))}
+        </div>
+        {/* Chart area */}
+        <div className="relative flex-1" style={{ height: 64 }}>
+          {/* Horizontal gridlines */}
+          {ticks.map(v => (
+            <div
+              key={v}
+              className="absolute left-0 right-0 border-t border-gray-700/40 pointer-events-none"
+              style={{ bottom: `${(v / yMax) * 100}%` }}
+            />
+          ))}
+          {/* Bars */}
+          <div className="absolute inset-0 flex gap-1.5 items-end">
+            {MANA_COLORS.map(color => {
+              const sym = symTotals[color] ?? 0
+              const land = landTotals[color] ?? 0
+              const symPct = (sym / yMax) * 100
+              const landPct = (land / yMax) * 100
+              const { bg } = MANA_COLOR_STYLE[color]
+              return (
+                <div
+                  key={color}
+                  className="flex-1 flex items-end gap-0.5 h-full"
+                  onMouseEnter={() => setHovered(color)}
+                  onMouseLeave={() => setHovered(null)}
+                >
+                  <div
+                    className="flex-1 rounded-t-sm"
+                    style={{ height: sym > 0 ? `${Math.max(symPct, 4)}%` : '0', backgroundColor: bg }}
+                  />
+                  <div
+                    className="flex-1 rounded-t-sm"
+                    style={{ height: land > 0 ? `${Math.max(landPct, 4)}%` : '0', backgroundColor: bg, filter: 'brightness(1.5) saturate(0.4)' }}
+                  />
+                </div>
+              )
+            })}
+          </div>
+          {/* Shared tooltip */}
+          {hovered && (
+            <div
+              className="absolute bottom-full mb-1 bg-gray-900 border border-gray-700 text-[10px] px-2 py-1 rounded whitespace-nowrap pointer-events-none z-10 text-center"
+              style={{
+                left: `${(MANA_COLORS.indexOf(hovered) + 0.5) / MANA_COLORS.length * 100}%`,
+                transform: 'translateX(-50%)',
+              }}
+            >
+              <div className="text-gray-300 font-medium">{MANA_COLOR_STYLE[hovered].label}</div>
+              <div className="text-gray-400">{symTotals[hovered] ?? 0} symbols · {landTotals[hovered] ?? 0} lands</div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )
@@ -285,18 +284,22 @@ function ManaCurve({ cards, commander }: { cards: DeckCard[]; commander?: DeckCa
           const total = totals[i]
           const pct = (total / maxCount) * 100
           return (
-            <div key={label} className="flex flex-col items-center justify-end flex-1 min-w-0">
+            <div key={label} className="relative flex flex-col items-center justify-end flex-1 min-w-0 group">
               {total > 0 && (
                 <div className="text-[10px] text-gray-400 mb-0.5 leading-none">{total}</div>
               )}
               <div
                 className="w-full flex flex-col overflow-hidden rounded-t-sm"
                 style={{ height: total === 0 ? '1px' : `${Math.max(pct, 5)}%`, opacity: total === 0 ? 0.15 : 0.85 }}
-                title={`CMC ${label}: ${perm} permanent${perm !== 1 ? 's' : ''}, ${nonPerm} non-permanent${nonPerm !== 1 ? 's' : ''}`}
               >
                 {nonPerm > 0 && <div style={{ flex: nonPerm }} className="bg-mtg-gold" />}
                 {perm > 0 && <div style={{ flex: perm }} className="bg-mtg-accent" />}
               </div>
+              {total > 0 && (
+                <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-gray-900 border border-gray-700 text-white text-[10px] px-2 py-1 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-75 pointer-events-none z-10">
+                  CMC {label}: {perm} perm{perm !== 1 ? 's' : ''}, {nonPerm} non-perm{nonPerm !== 1 ? 's' : ''}
+                </div>
+              )}
             </div>
           )
         })}
@@ -692,10 +695,7 @@ export default function DeckDetail() {
             </div>
             <div className="flex flex-col flex-1 min-w-0 gap-4">
               <ManaCurve cards={mainboard} commander={commander} />
-              <div className="flex gap-6 justify-around">
-                <ManaSymbolPie cards={mainboard} commander={commander} />
-                <LandProductionPie cards={mainboard} />
-              </div>
+              <ManaColorChart cards={mainboard} commander={commander} />
             </div>
           </div>
         ) : (
