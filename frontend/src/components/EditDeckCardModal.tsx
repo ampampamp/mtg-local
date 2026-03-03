@@ -62,12 +62,12 @@ export default function EditDeckCardModal({
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-mtg-surface rounded-xl p-6 w-80 space-y-4 shadow-2xl" onClick={e => e.stopPropagation()}>
-        <div className="flex gap-3 items-start">
+      <div className="bg-mtg-surface rounded-xl p-6 w-[420px] space-y-4 shadow-2xl" onClick={e => e.stopPropagation()}>
+        <div className="flex flex-col items-center gap-2">
           {card.image_uri && (
-            <img src={card.image_uri} alt={card.name} className="w-16 rounded flex-shrink-0" />
+            <img src={card.image_uri} alt={card.name} className="w-48 rounded-lg" />
           )}
-          <div className="min-w-0">
+          <div className="text-center">
             <h2 className="text-base font-bold leading-tight">{card.name}</h2>
             <div className="text-xs text-gray-400 mt-0.5 capitalize">{card.board}</div>
           </div>
@@ -82,7 +82,6 @@ export default function EditDeckCardModal({
             onChange={e => setQty(+e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') save() }}
             className="input w-full"
-            autoFocus
           />
         </label>
 
