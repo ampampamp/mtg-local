@@ -83,6 +83,12 @@ function annotateGroups(groups: CardGroup[]): AnnotatedGroup[] {
   }))
 }
 
+function mergeGroupLabels(main: AnnotatedGroup[], maybe: AnnotatedGroup[]): string[] {
+  const mainLabels = main.map(g => g.label)
+  const seen = new Set(mainLabels)
+  return [...mainLabels, ...maybe.map(g => g.label).filter(l => !seen.has(l))]
+}
+
 // ── Mana pie charts ───────────────────────────────────────────────────────────
 const MANA_COLORS = ['W', 'U', 'B', 'R', 'G', 'C'] as const
 type ManaColor = typeof MANA_COLORS[number]
@@ -322,6 +328,7 @@ function DeckCardTile({
   return (
     <div
       data-card-index={navIndex}
+      data-board={board}
       className={`cursor-pointer rounded-lg ${selected ? 'ring-2 ring-blue-400' : ''}`}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
@@ -352,55 +359,6 @@ function DeckCardTile({
       <div className="mt-1 flex justify-center">
         <OwnershipBadge ownership={card._ownership} needed={board === 'mainboard' ? card.quantity : 0} />
       </div>
-    </div>
-  )
-}
-
-// ── Section group renderer ────────────────────────────────────────────────────
-function BoardSection({
-  groups, board, selectedBoard, selectedIndex,
-  onSelect, onDoubleClick, onRemove, onMove, containerRef,
-}: {
-  groups: AnnotatedGroup[]
-  board: TargetBoard
-  selectedBoard: TargetBoard | null
-  selectedIndex: number | null
-  onSelect: (seqIdx: number) => void
-  onDoubleClick: (card: DeckCard) => void
-  onRemove: (card: DeckCard) => void
-  onMove: (card: DeckCard) => void
-  containerRef: React.RefObject<HTMLDivElement | null>
-}) {
-  const CARD_GRID = 'grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-7 xl:grid-cols-8 gap-2'
-  const showHeaders = groups.length > 1 || (groups.length === 1 && groups[0].label !== '')
-
-  return (
-    <div ref={containerRef} className="space-y-4">
-      {groups.map(({ label, cards }) => (
-        <div key={label || '__flat__'}>
-          {showHeaders && (
-            <div className="flex items-center gap-2 mb-2">
-              <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">{label}</span>
-              <span className="text-xs text-gray-600">{cards.reduce((s, c) => s + c.card.quantity, 0)}</span>
-            </div>
-          )}
-          <div className={CARD_GRID}>
-            {cards.map(({ card, seqIdx }) => (
-              <DeckCardTile
-                key={`${label}-${card.id}`}
-                card={card}
-                board={board}
-                navIndex={seqIdx}
-                selected={selectedBoard === board && selectedIndex === seqIdx}
-                onClick={() => onSelect(seqIdx)}
-                onDoubleClick={() => onDoubleClick(card)}
-                onRemove={() => onRemove(card)}
-                onMove={() => onMove(card)}
-              />
-            ))}
-          </div>
-        </div>
-      ))}
     </div>
   )
 }
@@ -441,8 +399,7 @@ export default function DeckDetail() {
   const [editingName, setEditingName] = useState(false)
   const [editingNameValue, setEditingNameValue] = useState('')
 
-  const mainContainerRef = useRef<HTMLDivElement | null>(null)
-  const maybeContainerRef = useRef<HTMLDivElement | null>(null)
+  const boardAreaRef = useRef<HTMLDivElement | null>(null)
   const addFocusRef = useRef<(() => void) | null>(null)
   const scrollPending = useRef(false)
 
@@ -561,6 +518,13 @@ export default function DeckDetail() {
         return
       }
 
+      // 'm' toggles the maybeboard tray
+      if (e.key.toLowerCase() === 'm' && !editModal && !addPicker && !commanderPicker) {
+        e.preventDefault()
+        setShowMaybe(v => !v)
+        return
+      }
+
       if (e.key === 'Enter' && selectedIndex !== null && selectedBoard && !editModal) {
         e.preventDefault()
         const cards = selectedBoard === 'mainboard' ? mainNavSequence : maybeNavSequence
@@ -584,12 +548,11 @@ export default function DeckDetail() {
           next = cur < 0 ? 0 : Math.min(total - 1, cur + 1)
         } else {
           // Up/Down: find the visually adjacent card using DOM rects
-          const containerRef = selectedBoard === 'mainboard' ? mainContainerRef : maybeContainerRef
-          const container = containerRef.current
+          const container = boardAreaRef.current
           if (!container || cur < 0) {
             next = 0
           } else {
-            const allTiles = Array.from(container.querySelectorAll('[data-card-index]')) as HTMLElement[]
+            const allTiles = Array.from(container.querySelectorAll(`[data-board="${selectedBoard}"][data-card-index]`)) as HTMLElement[]
             const currentEl = allTiles.find(el => el.dataset.cardIndex === String(cur))
             if (currentEl) {
               const curRect = currentEl.getBoundingClientRect()
@@ -631,8 +594,7 @@ export default function DeckDetail() {
   useEffect(() => {
     if (!scrollPending.current || selectedIndex === null || !selectedBoard) return
     scrollPending.current = false
-    const containerRef = selectedBoard === 'mainboard' ? mainContainerRef : maybeContainerRef
-    const el = containerRef.current?.querySelector(`[data-card-index="${selectedIndex}"]`) as HTMLElement | undefined
+    const el = boardAreaRef.current?.querySelector(`[data-board="${selectedBoard}"][data-card-index="${selectedIndex}"]`) as HTMLElement | undefined
     el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
   }, [selectedIndex, selectedBoard])
 
@@ -860,7 +822,7 @@ export default function DeckDetail() {
         )}
       </div>
 
-      {/* ── Mainboard ── */}
+      {/* ── Board area ── */}
       <div className="space-y-3">
         <div className="flex items-center gap-2 border-b border-gray-700 pb-2 flex-wrap">
           <h2 className="font-semibold">Mainboard</h2>
@@ -874,60 +836,123 @@ export default function DeckDetail() {
               <button onClick={() => { setTagFilter(null); setSelectedIndex(null) }} className="text-gray-500 hover:text-gray-300 text-xs">✕</button>
             </div>
           )}
+          {showMaybe && (
+            <div className="ml-auto flex items-center gap-2">
+              <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Maybeboard</span>
+              <span className="text-xs bg-mtg-card px-2 py-0.5 rounded-full text-gray-400">
+                {maybeFiltered.reduce((s, c) => s + c.quantity, 0)} cards
+              </span>
+            </div>
+          )}
         </div>
 
-        {mainboard.length === 0 ? (
+        {mainboard.length === 0 && maybeboard.length === 0 ? (
           <div className="text-center text-gray-600 py-8 text-sm">No cards yet — search above or paste a list</div>
-        ) : mainFiltered.length === 0 ? (
+        ) : mainFiltered.length === 0 && maybeFiltered.length === 0 ? (
           <div className="text-center text-gray-600 py-4 text-sm">No cards match this tag filter</div>
         ) : (
-          <BoardSection
-            groups={mainGroups}
-            board="mainboard"
-            selectedBoard={selectedBoard}
-            selectedIndex={selectedIndex}
-            onSelect={idx => { setSelectedBoard('mainboard'); setSelectedIndex(idx) }}
-            onDoubleClick={openEdit}
-            onRemove={card => removeMutation.mutate({ oracleId: card.oracle_id, board: 'mainboard' })}
-            onMove={card => moveMutation.mutate({ oracleId: card.oracle_id, fromBoard: 'mainboard', toBoard: 'maybeboard' })}
-            containerRef={mainContainerRef}
-          />
-        )}
-      </div>
-
-      {/* ── Maybeboard (collapsible) ── */}
-      <div>
-        <button
-          onClick={() => setShowMaybe(v => !v)}
-          className="text-sm text-gray-500 hover:text-gray-300 flex items-center gap-1 transition-colors"
-        >
-          <span>{showMaybe ? '▾' : '▸'}</span>
-          Maybeboard
-          <span className="text-xs text-gray-600 ml-1">({maybeboard.reduce((s, c) => s + c.quantity, 0)} cards)</span>
-        </button>
-
-        {showMaybe && (
-          <div className="mt-3">
-            {maybeboard.length === 0 ? (
-              <div className="text-xs text-gray-600 py-2">No cards in maybeboard</div>
-            ) : maybeFiltered.length === 0 ? (
-              <div className="text-xs text-gray-600 py-2">No cards match this tag filter</div>
-            ) : (
-              <BoardSection
-                groups={maybeGroups}
-                board="maybeboard"
-                selectedBoard={selectedBoard}
-                selectedIndex={selectedIndex}
-                onSelect={idx => { setSelectedBoard('maybeboard'); setSelectedIndex(idx) }}
-                onDoubleClick={openEdit}
-                onRemove={card => removeMutation.mutate({ oracleId: card.oracle_id, board: 'maybeboard' })}
-                onMove={card => moveMutation.mutate({ oracleId: card.oracle_id, fromBoard: 'maybeboard', toBoard: 'mainboard' })}
-                containerRef={maybeContainerRef}
-              />
-            )}
+          <div ref={boardAreaRef} className="space-y-6">
+            {mergeGroupLabels(mainGroups, maybeGroups).map(label => {
+              const mainSection = mainGroups.find(g => g.label === label)
+              const maybeSection = maybeGroups.find(g => g.label === label)
+              if (!mainSection?.cards.length && !maybeSection?.cards.length) return null
+              const showLabel = label !== ''
+              const mainCount = mainSection?.cards.reduce((s, c) => s + c.card.quantity, 0) ?? 0
+              const maybeCount = maybeSection?.cards.reduce((s, c) => s + c.card.quantity, 0) ?? 0
+              return (
+                <div key={label || '__flat__'} className="flex items-stretch">
+                  {/* Main column */}
+                  <div className="flex-1 min-w-0">
+                    {showLabel && mainCount > 0 && (
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">{label}</span>
+                        <span className="text-xs text-gray-600">{mainCount}</span>
+                      </div>
+                    )}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(90px, 1fr))', gap: '8px' }}>
+                      {mainSection?.cards.map(({ card, seqIdx }) => (
+                        <DeckCardTile
+                          key={`main-${label}-${card.id}`}
+                          card={card}
+                          board="mainboard"
+                          navIndex={seqIdx}
+                          selected={selectedBoard === 'mainboard' && selectedIndex === seqIdx}
+                          onClick={() => { setSelectedBoard('mainboard'); setSelectedIndex(seqIdx) }}
+                          onDoubleClick={() => openEdit(card)}
+                          onRemove={() => removeMutation.mutate({ oracleId: card.oracle_id, board: 'mainboard' })}
+                          onMove={() => moveMutation.mutate({ oracleId: card.oracle_id, fromBoard: 'mainboard', toBoard: 'maybeboard' })}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                  {/* Vertical divider — animates with maybe column */}
+                  <div
+                    style={{
+                      flexShrink: 0,
+                      width: showMaybe ? '1px' : '0',
+                      margin: showMaybe ? '0 12px' : '0',
+                      alignSelf: 'stretch',
+                      backgroundColor: 'rgba(75, 85, 99, 0.4)',
+                      transition: 'width 0.3s ease, margin 0.3s ease',
+                    }}
+                  />
+                  {/* Maybeboard column — slides in from right */}
+                  <div
+                    style={{
+                      width: showMaybe ? '32%' : '0',
+                      flexShrink: 0,
+                      overflow: 'hidden',
+                      transition: 'width 0.3s ease',
+                    }}
+                  >
+                    {showLabel && maybeCount > 0 && (
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">{label}</span>
+                        <span className="text-xs text-gray-700">{maybeCount}</span>
+                      </div>
+                    )}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(90px, 1fr))', gap: '8px' }}>
+                      {maybeSection?.cards.map(({ card, seqIdx }) => (
+                        <DeckCardTile
+                          key={`maybe-${label}-${card.id}`}
+                          card={card}
+                          board="maybeboard"
+                          navIndex={seqIdx}
+                          selected={selectedBoard === 'maybeboard' && selectedIndex === seqIdx}
+                          onClick={() => { setSelectedBoard('maybeboard'); setSelectedIndex(seqIdx) }}
+                          onDoubleClick={() => openEdit(card)}
+                          onRemove={() => removeMutation.mutate({ oracleId: card.oracle_id, board: 'maybeboard' })}
+                          onMove={() => moveMutation.mutate({ oracleId: card.oracle_id, fromBoard: 'maybeboard', toBoard: 'mainboard' })}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
           </div>
         )}
       </div>
+
+      {/* Fixed tab: Maybeboard toggle */}
+      <button
+        onClick={() => setShowMaybe(v => !v)}
+        style={{
+          position: 'fixed',
+          right: 0,
+          top: '50%',
+          transform: 'translateY(-50%)',
+          writingMode: 'vertical-lr',
+          zIndex: 30,
+        }}
+        className={`border border-r-0 text-xs px-2 py-4 rounded-l-lg transition-colors shadow-lg
+          ${showMaybe
+            ? 'bg-mtg-accent/20 border-mtg-accent/50 text-mtg-accent'
+            : 'bg-mtg-surface border-gray-700 text-gray-400 hover:text-white hover:bg-mtg-card'
+          }`}
+      >
+        Maybeboard ({maybeboard.reduce((s, c) => s + c.quantity, 0)})
+      </button>
     </div>
   )
 }

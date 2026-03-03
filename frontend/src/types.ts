@@ -17,6 +17,7 @@ export interface ScryfallCard {
   oracle_text?: string
   colors?: string[]
   image_uri?: string
+  image_uri_back?: string
   image_uris?: { normal: string; small: string; art_crop: string }
   card_faces?: { name: string; image_uris?: { normal: string } }[]
   set: string
