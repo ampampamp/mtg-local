@@ -17,6 +17,13 @@ CONDITIONS = ["NM", "LP", "MP", "HP", "DMG"]
 
 
 CONDITION_MAP = {
+    # Short codes (written by export)
+    "nm": "NM",
+    "lp": "LP",
+    "mp": "MP",
+    "hp": "HP",
+    "dmg": "DMG",
+    # Long-form strings (from Moxfield CSV)
     "mint": "NM",
     "near mint": "NM",
     "good (lightly played)": "LP",

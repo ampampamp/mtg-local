@@ -283,6 +283,25 @@ export default function CollectionPage() {
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
+  function handleExport() {
+    const header = 'Count,Name,Edition,Collector Number,Foil,Condition,Language'
+    const rows: string[] = [header]
+    for (const c of cards) {
+      const esc = (s: string) => s.includes(',') ? `"${s}"` : s
+      if (c.quantity > 0)
+        rows.push(`${c.quantity},${esc(c.name)},${c.set_code},${c.collector_number},,${c.condition},English`)
+      if (c.foil_quantity > 0)
+        rows.push(`${c.foil_quantity},${esc(c.name)},${c.set_code},${c.collector_number},foil,${c.condition},English`)
+    }
+    const blob = new Blob([rows.join('\n')], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'collection.csv'
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   async function handleImport() {
     if (!importCsv.trim()) return
     setImporting(true)
@@ -392,6 +411,13 @@ export default function CollectionPage() {
             onClick={() => { setImportOpen(o => !o); setImportResult(null) }}
           >
             ⬆ Import CSV
+          </button>
+          <button
+            className="btn-secondary text-sm"
+            onClick={handleExport}
+            disabled={cards.length === 0}
+          >
+            ⬇ Export CSV
           </button>
         </div>
       </div>

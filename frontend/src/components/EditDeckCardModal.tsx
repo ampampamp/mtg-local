@@ -65,7 +65,7 @@ export default function EditDeckCardModal({
       <div className="bg-mtg-surface rounded-xl p-6 w-[420px] space-y-4 shadow-2xl" onClick={e => e.stopPropagation()}>
         <div className="flex flex-col items-center gap-2">
           {card.image_uri && (
-            <img src={card.image_uri} alt={card.name} className="w-48 rounded-lg" />
+            <img src={card.image_uri} alt={card.name} className="w-full rounded-lg" />
           )}
           <div className="text-center">
             <h2 className="text-base font-bold leading-tight">{card.name}</h2>
