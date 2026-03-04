@@ -710,38 +710,6 @@ export default function DeckDetail() {
         )}
       </div>
 
-      {/* ── Grouping + sort toggles ── */}
-      <div className="flex items-center gap-4 flex-wrap py-1">
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-gray-500">Group</span>
-          <div className="flex rounded overflow-hidden border border-gray-700 text-xs">
-            {([['none', 'None'], ['type', 'Type'], ['tags', 'Tags']] as [Grouping, string][]).map(([val, label]) => (
-              <button
-                key={val}
-                onClick={() => setGrouping(val)}
-                className={`px-2.5 py-1 transition-colors ${grouping === val ? 'bg-mtg-accent text-white' : 'bg-mtg-card text-gray-400 hover:text-gray-200'}`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-gray-500">Sort</span>
-          <div className="flex rounded overflow-hidden border border-gray-700 text-xs">
-            {([['cmc', 'CMC'], ['alpha', 'A→Z']] as [SortBy, string][]).map(([val, label]) => (
-              <button
-                key={val}
-                onClick={() => setSortBy(val)}
-                className={`px-2.5 py-1 transition-colors ${sortBy === val ? 'bg-mtg-accent text-white' : 'bg-mtg-card text-gray-400 hover:text-gray-200'}`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
       {/* Modals */}
       {addPicker && (
         <PrintingPickerModal
@@ -776,8 +744,8 @@ export default function DeckDetail() {
         />
       )}
 
-      {/* ── Add card controls ── */}
-      <div className="space-y-2">
+      {/* ── Controls row ── */}
+      <div className="space-y-2 sticky top-0 z-20 bg-mtg-bg py-2 -my-2">
         <div className="flex gap-2 items-center">
           <CardAutocomplete
             placeholder="Add a card... (a)"
@@ -785,7 +753,7 @@ export default function DeckDetail() {
             focusRef={addFocusRef}
             onFocus={() => { setSelectedIndex(null); setSelectedBoard(null) }}
             clearOnSelect
-            className="flex-1"
+            className="w-1/2"
           />
           <div className="flex rounded-lg overflow-hidden border border-gray-600 text-xs flex-shrink-0">
             {(['mainboard', 'maybeboard'] as TargetBoard[]).map(b => (
@@ -801,6 +769,35 @@ export default function DeckDetail() {
           <button onClick={() => setShowImport(v => !v)} className="btn-secondary text-xs flex-shrink-0">
             {showImport ? 'Cancel' : '⬆ Paste'}
           </button>
+          <div className="flex-1" />
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            <span className="text-xs text-gray-500">Group</span>
+            <div className="flex rounded overflow-hidden border border-gray-700 text-xs">
+              {([['none', 'None'], ['type', 'Type'], ['tags', 'Tags']] as [Grouping, string][]).map(([val, label]) => (
+                <button
+                  key={val}
+                  onClick={() => setGrouping(val)}
+                  className={`px-2.5 py-1 transition-colors ${grouping === val ? 'bg-mtg-accent text-white' : 'bg-mtg-card text-gray-400 hover:text-gray-200'}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            <span className="text-xs text-gray-500">Sort</span>
+            <div className="flex rounded overflow-hidden border border-gray-700 text-xs">
+              {([['cmc', 'CMC'], ['alpha', 'A→Z']] as [SortBy, string][]).map(([val, label]) => (
+                <button
+                  key={val}
+                  onClick={() => setSortBy(val)}
+                  className={`px-2.5 py-1 transition-colors ${sortBy === val ? 'bg-mtg-accent text-white' : 'bg-mtg-card text-gray-400 hover:text-gray-200'}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
         {showImport && (
