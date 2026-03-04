@@ -44,7 +44,10 @@ app.include_router(decks.router, prefix="/api/decks", tags=["decks"])
 app.include_router(system.router, prefix="/api/system", tags=["system"])
 
 # Serve React frontend in production (when dist/ exists)
-frontend_dist = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
+frontend_dist = (
+    os.environ.get("FRONTEND_DIST")
+    or os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
+)
 if os.path.exists(frontend_dist):
     app.mount("/assets", StaticFiles(directory=os.path.join(frontend_dist, "assets")), name="assets")
 

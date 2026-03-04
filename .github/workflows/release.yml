@@ -1,0 +1,94 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python deps + PyInstaller
+        run: |
+          pip install -r backend/requirements.txt pyinstaller
+
+      - name: Write version to VERSION file
+        run: |
+          echo "${GITHUB_REF_NAME#v}" > backend/VERSION
+
+      - name: Build macOS app
+        run: |
+          cd backend
+          pyinstaller launcher.spec
+
+      - name: Zip macOS app
+        run: |
+          cd backend/dist
+          ditto -c -k --keepParent "MTG Local.app" "MTG-Local-macOS.zip"
+
+      - name: Upload macOS artifact to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: backend/dist/MTG-Local-macOS.zip
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python deps + PyInstaller
+        run: |
+          pip install -r backend/requirements.txt pyinstaller
+
+      - name: Write version to VERSION file
+        shell: bash
+        run: |
+          echo "${GITHUB_REF_NAME#v}" > backend/VERSION
+
+      - name: Build Windows exe
+        run: |
+          cd backend
+          pyinstaller launcher.spec
+
+      - name: Upload Windows artifact to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: backend/dist/MTG Local.exe

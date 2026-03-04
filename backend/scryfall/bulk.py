@@ -1,7 +1,7 @@
 import os
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 import httpx
@@ -11,7 +11,6 @@ logger = logging.getLogger(__name__)
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 BULK_META_FILE = Path(DATA_DIR) / "bulk_meta.json"
 BULK_CARDS_FILE = Path(DATA_DIR) / "default_cards.json"
-STALENESS_DAYS = 7
 
 HEADERS = {
     "User-Agent": "MTGLocalManager/1.0",
@@ -20,21 +19,17 @@ HEADERS = {
 
 
 async def ensure_bulk_data_fresh():
-    """Download Scryfall bulk data if missing or older than STALENESS_DAYS."""
+    """Download Scryfall bulk data if missing."""
     if _is_fresh():
-        logger.info("Bulk card data is fresh, skipping download.")
+        logger.info("Bulk card data is present, skipping download.")
         return
 
-    logger.info("Bulk card data is stale or missing. Downloading...")
+    logger.info("Bulk card data is missing. Downloading...")
     await _download_bulk_data()
 
 
 def _is_fresh() -> bool:
-    if not BULK_CARDS_FILE.exists() or not BULK_META_FILE.exists():
-        return False
-    meta = json.loads(BULK_META_FILE.read_text())
-    downloaded_at = datetime.fromisoformat(meta["downloaded_at"])
-    return datetime.utcnow() - downloaded_at < timedelta(days=STALENESS_DAYS)
+    return BULK_META_FILE.exists() and BULK_CARDS_FILE.exists()
 
 
 async def _download_bulk_data():

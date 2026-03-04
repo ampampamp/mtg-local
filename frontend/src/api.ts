@@ -82,3 +82,9 @@ export const getBulkStatus = () =>
 
 export const triggerBulkRefresh = () =>
   api.post('/system/bulk-refresh').then(r => r.data)
+
+export const getSystemVersion = () =>
+  api.get('/system/version').then(r => r.data)
+
+export const triggerUpdate = () =>
+  api.post('/system/update').then(r => r.data)

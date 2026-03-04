@@ -1,17 +1,68 @@
 # MTG Local Manager
 
-A lightweight local clone of Moxfield for managing your Magic: The Gathering collection and decks.
+A lightweight local app for managing your Magic: The Gathering collection and decks — search cards, track your collection, and build decks, all offline.
 
-- **Card database**: Scryfall bulk data (~300MB, loaded into memory on startup, refreshed weekly)
-- **Backend**: FastAPI + SQLite
-- **Frontend**: React + Vite + Tailwind
-- **Packaged**: Single Docker container
+---
 
-## Prerequisites
+## Download & Run (end users)
 
-- Docker Desktop (for the packaged version)
-- Node.js 18+ and Python 3.12+ (for local dev)
+No installation required. The app runs entirely on your machine — card data stays local, nothing is sent to the cloud.
+
+### macOS
+
+1. Go to the [Releases page](https://github.com/ampampamp/mtg-local/releases/latest) and download **MTG-Local-macOS.zip**
+2. Double-click the zip to extract it — you'll get **MTG Local.app**
+3. Drag **MTG Local.app** to your Applications folder (optional but recommended)
+4. **First launch only**: macOS will block the app because it isn't from the App Store.
+   - Right-click (or Control-click) the app → **Open**
+   - Click **Open** in the dialog that appears
+   - You only need to do this once
+5. A small sword icon appears in your menu bar. The app will download ~300MB of card data on first run — this takes 2–5 minutes depending on your connection.
+6. Your browser opens automatically once the app is ready.
+
+> **If you see "MTG Local is damaged and can't be opened"**, open Terminal and run:
+> ```
+> xattr -cr "/Applications/MTG Local.app"
+> ```
+> Then try launching again.
+
+### Windows
+
+1. Go to the [Releases page](https://github.com/ampampamp/mtg-local/releases/latest) and download **MTG-Local-Windows.exe**
+2. Double-click the exe to run it
+3. **First launch only**: Windows SmartScreen may warn "Windows protected your PC" because the app isn't code-signed.
+   - Click **More info** → **Run anyway**
+4. A small icon appears in your system tray (bottom-right corner, you may need to click the ^ arrow to see it). The app will download ~300MB of card data on first run — this takes 2–5 minutes.
+5. Your browser opens automatically once the app is ready.
+
+### Daily use
+
+- The app lives in your **menu bar** (macOS) or **system tray** (Windows)
+- Click the icon for options: **Open MTG Local**, **Update Card Data**, **Quit**
+- Your browser opens to the app at a local address — no internet required after first run
+- **Update Card Data** re-downloads the latest Scryfall card database (~300MB)
+
+### Updating the app
+
+When a new version is available, a pulsing **↑ Update** button appears in the navbar. Click it and the app will download the update and restart automatically.
+
+Or download the new version manually from the [Releases page](https://github.com/ampampamp/mtg-local/releases/latest) and replace the old file.
+
+### Where is my data stored?
+
+Your collection and decks are stored locally in:
+- **macOS**: `~/Library/Application Support/MTGLocal/`
+- **Windows**: `%APPDATA%\MTGLocal\`
+
+Back up the `mtg.db` file in that folder to keep your collection safe.
+
+---
+
+## Developer setup
+
+- Node.js 18+ and Python 3.12+
 - Git
+- Docker Desktop (optional — for the containerized version)
 
 ### Installing prerequisites on macOS
 
@@ -148,10 +199,64 @@ mtg-local/
 
 ---
 
+## Releasing a new version
+
+Regular commits and pushes to `main` **do not affect end users** — people running the packaged app are running a frozen binary that only updates when you explicitly publish a release. You can push as many commits as you want and batch them up before deciding to ship.
+
+A release is triggered by pushing a **version tag**. GitHub Actions then builds both the macOS and Windows binaries and uploads them to a GitHub Release automatically. That's the artifact users download or auto-update to.
+
+### Step-by-step
+
+1. **Finish your changes** — commit everything to `main` as normal.
+
+2. **Bump the version** in `backend/VERSION`:
+   ```
+   1.1.0
+   ```
+   Commit it:
+   ```bash
+   git add backend/VERSION
+   git commit -m "Bump version to 1.1.0"
+   git push
+   ```
+
+3. **Tag the release** — the tag must start with `v` and match the version in `backend/VERSION`:
+   ```bash
+   git tag v1.1.0
+   git push origin v1.1.0
+   ```
+   That's it. GitHub Actions takes over from here.
+
+4. **Watch the build** — go to the Actions tab on GitHub. Two parallel jobs run (`build-macos` and `build-windows`), each taking ~5–10 minutes. When both finish, the artifacts are attached to a new GitHub Release at `github.com/ampampamp/mtg-local/releases/tag/v1.1.0`.
+
+5. **Add release notes** (optional but nice) — go to the Releases page on GitHub, click **Edit** on the new release, and write a changelog. Users see this on the releases page.
+
+### What users see
+
+Once the release is published:
+- Users running the packaged app will see a pulsing **↑ Update (v1.1.0)** button in the navbar the next time they open it (the app checks GitHub once per hour)
+- Clicking it downloads the new binary and restarts the app automatically
+- Users who haven't run the app yet will get the latest version when they download from the releases page
+
+### Versioning convention
+
+Use [semantic versioning](https://semver.org):
+- `1.0.1` — bug fix, no new features
+- `1.1.0` — new feature, backward-compatible
+- `2.0.0` — breaking change (e.g. DB migration required)
+
+### If a build fails
+
+Check the Actions tab. Common causes:
+- Frontend build error (TypeScript/lint failure) — fix and re-tag: delete the old tag first with `git push origin --delete v1.1.0`, then fix, commit, and re-push the tag
+- PyInstaller missing a hidden import — add it to `backend/launcher.spec` under `hiddenimports`
+
+---
+
 ## Roadmap
 
 - [x] Phase 5: Bulk CSV import (Moxfield format)
-- [ ] Phase 6: Tauri wrapper for macOS app
+- [x] Phase 6: Packaged desktop app (macOS + Windows) with system tray + auto-update
 - [ ] Price tracking over time
 - [ ] Commander staples / card recommendations
 - [ ] Proxy printing export

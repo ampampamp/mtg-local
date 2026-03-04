@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import clsx from 'clsx'
-import { getBulkStatus, triggerBulkRefresh } from '../api'
+import { getBulkStatus, triggerBulkRefresh, getSystemVersion, triggerUpdate } from '../api'
 import SearchBar from './SearchBar'
 
 const nav = [
@@ -17,10 +17,21 @@ export default function Navbar() {
   const [syncError, setSyncError] = useState<string | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
+  const [updateAvailable, setUpdateAvailable] = useState(false)
+  const [latestVersion, setLatestVersion] = useState<string | null>(null)
+  const [updating, setUpdating] = useState(false)
+
   useEffect(() => {
     getBulkStatus().then((s: any) => {
       setSyncing(s.syncing)
       setLastSynced(s.downloaded_at ?? null)
+    }).catch(() => {})
+
+    getSystemVersion().then((v: any) => {
+      if (v.update_available) {
+        setUpdateAvailable(true)
+        setLatestVersion(v.latest_version ?? null)
+      }
     }).catch(() => {})
   }, [])
 
@@ -85,6 +96,25 @@ export default function Navbar() {
         )}
         {formattedDate && !syncing && (
           <span className="text-xs text-gray-500 hidden lg:block">DB: {formattedDate}</span>
+        )}
+        {updateAvailable && !updating && (
+          <button
+            onClick={async () => {
+              setUpdating(true)
+              try {
+                await triggerUpdate()
+              } catch {
+                setUpdating(false)
+              }
+            }}
+            className="btn text-xs flex items-center gap-1.5 bg-indigo-700 hover:bg-indigo-600 text-white animate-pulse"
+            title={`Update to v${latestVersion}`}
+          >
+            ↑ Update{latestVersion ? ` (v${latestVersion})` : ''}
+          </button>
+        )}
+        {updating && (
+          <span className="text-xs text-indigo-300">Updating... app will restart</span>
         )}
         <button
           onClick={handleSync}
